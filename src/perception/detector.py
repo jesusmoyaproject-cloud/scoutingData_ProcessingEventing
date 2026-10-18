@@ -70,7 +70,11 @@ class YOLODetector:
             return root / default_rel
 
         # Rutas por defecto según formato
-        if self.format == "pt":
+        if self.format == "engine":
+            def_player = "models/modelPlayer.engine"
+            def_ball = "models/modelBall.engine"
+            def_kp = "models/modelKeypoint.engine"
+        elif self.format == "pt":
             def_player = "models/modelPlayer.pt"
             def_ball = "models/modelBall.pt"
             def_kp = "models/modelKeypoint.pt"
@@ -100,7 +104,7 @@ class YOLODetector:
         if cfg_half is not None:
             self.half = bool(cfg_half) and ("cuda" in str(self.device).lower())
         else:
-            self.half = (self.format == "pt" and "cuda" in str(self.device).lower())
+            self.half = (self.format in ("pt", "engine") and "cuda" in str(self.device).lower())
 
         # Configuración de concurrencia y CUDA Streams
         self.is_cuda = ("cuda" in str(self.device).lower()) and is_cuda_available()
@@ -128,7 +132,12 @@ class YOLODetector:
                     f"Asegúrese de ubicar los pesos en la carpeta models/."
                 )
 
-        if self.format == "pt":
+        if self.format == "engine":
+            # TensorRT Engine (.engine) nativo para GPU
+            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
+            self.player_model = YOLO(str(self.player_model_path), task="detect")
+            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
+        elif self.format == "pt":
             self.keypoint_model = YOLO(str(self.keypoint_model_path))
             self.player_model = YOLO(str(self.player_model_path))
             self.ball_model = YOLO(str(self.ball_model_path))

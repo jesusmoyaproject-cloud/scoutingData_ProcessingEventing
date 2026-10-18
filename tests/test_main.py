@@ -429,6 +429,10 @@ class SoccerAnalyticsPipeline:
                         "is_interpolated": ball_det.get("interpolated", False),
                     } if ball_det is not None else None,
                     "possession": possession_info,
+                    "homography": {
+                        "valid": bool(H is not None),
+                        "matrix": [[round(float(val), 6) for val in row] for row in H] if H is not None else None,
+                    },
                     "homography_valid": bool(H is not None),
                 })
 

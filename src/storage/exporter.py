@@ -29,15 +29,19 @@ class DataExporter:
         self,
         dataset: Dict[str, Any],
         output_path: Union[str, Path],
+        compact: bool = False,
     ) -> str:
         """Exporta el dataset completo en formato JSON contract."""
         p = Path(output_path)
         p.parent.mkdir(parents=True, exist_ok=True)
 
         with open(p, "w", encoding="utf-8") as f:
-            json.dump(dataset, f, indent=2)
+            if compact:
+                json.dump(dataset, f, separators=(",", ":"))
+            else:
+                json.dump(dataset, f, indent=2)
 
-        logger.info(f"[DataExporter] 💾 Tracking JSON exportado: {p}")
+        logger.info(f"[DataExporter] 💾 Tracking JSON exportado: {p} (compact={compact})")
         return str(p)
 
     def export_metadata_json(

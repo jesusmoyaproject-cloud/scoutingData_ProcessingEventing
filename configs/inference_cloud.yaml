@@ -1,16 +1,18 @@
 # configs/inference_cloud.yaml
-# Configuración optimizada para ejecución en nube (Colab / Kaggle T4 GPU / PyTorch CUDA)
+# Configuración optimizada para ejecución en nube (Colab / Kaggle L4 / T4 GPU)
+# Soporta format: "engine" (TensorRT) o "pt" (PyTorch FP16)
 
 environment: "COLAB"
 headless: true
+compact_json: true
 device: "cuda"
-format: "pt"
+format: "pt" # Cambiar a "engine" una vez compilados los modelos en models/
 half: true
 
 models:
-  player: "models/modelPlayer.pt"
-  ball: "models/modelBall.pt"
-  keypoints: "models/modelKeypoint.pt"
+  player: "models/modelPlayer.pt"       # o "models/modelPlayer.engine"
+  ball: "models/modelBall.pt"           # o "models/modelBall.engine"
+  keypoints: "models/modelKeypoint.pt"  # o "models/modelKeypoint.engine"
 
 data:
   input_video: "/content/input.mp4"
@@ -22,10 +24,10 @@ data:
   keypoints_audit_csv: "/content/outputs/keypoints_audit.csv"
 
 homography:
-  interval: 3
+  interval: 6
 
 tracking:
-  player_stride: 1
+  player_stride: 2
 
 stream:
   max_width: 1920

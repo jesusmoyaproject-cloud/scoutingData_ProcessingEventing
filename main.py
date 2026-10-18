@@ -402,6 +402,10 @@ class SoccerAnalyticsPipeline:
                         "is_interpolated": ball_det.get("interpolated", False),
                     } if ball_det is not None else None,
                     "possession": possession_info,
+                    "homography": {
+                        "valid": bool(H is not None),
+                        "matrix": [[round(float(val), 6) for val in row] for row in H] if H is not None else None,
+                    },
                     "homography_valid": bool(H is not None),
                 })
 
@@ -487,8 +491,9 @@ class SoccerAnalyticsPipeline:
         }
 
         # Exportación
+        compact_json = getattr(self.config, "compact_json", True) if self.headless else getattr(self.config, "compact_json", False)
         self.exporter.export_metadata_json(match_metadata, m_out)
-        self.exporter.export_json(final_dataset, j_out)
+        self.exporter.export_json(final_dataset, j_out, compact=compact_json)
         if all_events:
             self.exporter.export_events_csv(all_events, c_out)
         if export_sqlite:
@@ -504,7 +509,7 @@ class SoccerAnalyticsPipeline:
         print(f"   Posesión:        Equipo A: {possession_stats.get('team_0_pct', 0)}% | Equipo B: {possession_stats.get('team_1_pct', 0)}%")
         print(f"   Eventos:         {len(all_events)} detectados")
         print("   Archivos generados:")
-        print(f"     - Tracking JSON:  {j_out}")
+        print(f"     - Tracking JSON:  {j_out} (compacto={compact_json})")
         print(f"     - Metadata JSON:  {m_out}")
         if all_events:
             print(f"     - Eventos CSV:    {c_out}")
@@ -526,12 +531,15 @@ def main():
     parser.add_argument("--max-frames", "-m", type=int, default=None, help="Límite máximo de frames a procesar")
     parser.add_argument("--max-width", type=int, default=None, help="Ancho máximo de resolución para procesar (ej: 1920)")
     parser.add_argument("--headless", action="store_true", default=None, help="Forzar modo headless (sin MP4 ni overlays)")
+    parser.add_argument("--compact-json", action="store_true", default=None, help="Exportar JSON sin sangrías para ahorrar hasta 50% de espacio")
     parser.add_argument("--export-sqlite", action="store_true", default=False, help="Exportar base de datos SQLite")
     args = parser.parse_args()
 
     config = load_config(args.config)
     if args.headless:
         config.headless = True
+    if args.compact_json is not None:
+        config.compact_json = args.compact_json
     if args.max_width is not None:
         if not hasattr(config, "stream") or config.stream is None:
             config.stream = {}
