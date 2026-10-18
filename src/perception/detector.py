@@ -7,10 +7,20 @@ Ejecuta inferencia directa sin sockets HTTP ni capas cliente-servidor para:
 """
 
 import logging
+import warnings
 import time
 from pathlib import Path
 from typing import Tuple, Optional, Any, Union, List
 import numpy as np
+
+# Silenciar advertencias de dependencias externas
+warnings.filterwarnings("ignore")
+try:
+    from ultralytics.utils import LOGGER as ULTRALYTICS_LOGGER
+    ULTRALYTICS_LOGGER.setLevel(logging.ERROR)
+except Exception:
+    pass
+
 from ultralytics import YOLO
 
 from src.utils.config_loader import Config, load_config
@@ -113,6 +123,19 @@ class YOLODetector:
             self.keypoint_model = YOLO(str(self.keypoint_model_path))
             self.player_model = YOLO(str(self.player_model_path))
             self.ball_model = YOLO(str(self.ball_model_path))
+            if self.half and "cuda" in str(self.device).lower():
+                try:
+                    self.keypoint_model.to(self.device)
+                    self.player_model.to(self.device)
+                    self.ball_model.to(self.device)
+                    if hasattr(self.keypoint_model, "model") and self.keypoint_model.model is not None:
+                        self.keypoint_model.model.half()
+                    if hasattr(self.player_model, "model") and self.player_model.model is not None:
+                        self.player_model.model.half()
+                    if hasattr(self.ball_model, "model") and self.ball_model.model is not None:
+                        self.ball_model.model.half()
+                except Exception as e:
+                    logger.debug(f"[YOLODetector] Inicialización FP16 omitida: {e}")
         else:
             self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
             self.player_model = YOLO(str(self.player_model_path), task="detect")
@@ -124,7 +147,6 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
-            half=self.half,
             verbose=False,
             save=False,
         )[0]
@@ -152,7 +174,6 @@ class YOLODetector:
                     classes=classes,
                     tracker=tracker_file,
                     device=self.device,
-                    half=self.half,
                     verbose=False,
                 )[0]
             except Exception as e:
@@ -162,7 +183,6 @@ class YOLODetector:
                     conf=conf,
                     classes=classes,
                     device=self.device,
-                    half=self.half,
                     verbose=False,
                 )[0]
         else:
@@ -171,7 +191,6 @@ class YOLODetector:
                 conf=conf,
                 classes=classes,
                 device=self.device,
-                half=self.half,
                 verbose=False,
             )[0]
 
@@ -181,7 +200,6 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
-            half=self.half,
             verbose=False,
             save=False,
         )[0]

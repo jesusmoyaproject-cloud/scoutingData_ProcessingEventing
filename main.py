@@ -38,11 +38,22 @@ from src.analytics.events import MatchEventDetector
 from src.storage.exporter import DataExporter
 from src.visualization.renderer import MatchRenderer
 
+import warnings
+warnings.filterwarnings("ignore")
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
 logger = logging.getLogger("analitica_futbol.main")
+logger.setLevel(logging.WARNING)
+
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
+try:
+    from ultralytics.utils import LOGGER as ULTRALYTICS_LOGGER
+    ULTRALYTICS_LOGGER.setLevel(logging.ERROR)
+except Exception:
+    pass
 
 
 def extract_ball_detection(ball_result, conf_threshold: float = 0.40) -> Optional[Dict[str, Any]]:
@@ -194,16 +205,18 @@ class SoccerAnalyticsPipeline:
             scale_input = float(max_w) / float(width)
             proc_width = int(round(width * scale_input))
             proc_height = int(round(height * scale_input))
-            logger.info(
-                f"[Pipeline] ⚡ Re-escalado dinámico activo: {width}x{height} -> {proc_width}x{proc_height} "
-                f"(factor: {scale_input:.3f}, max_width: {max_w}px)"
-            )
 
-        logger.info(
-            f"📹 Video: {video_file.name} | {proc_width}x{proc_height} (orig: {width}x{height}) @ {fps:.1f}fps | "
-            f"Total: {total_frames} frames (Límite: {effective_total}) | "
-            f"Modo: {'HEADLESS' if self.headless else 'VIDEO + OVERLAYS'}"
-        )
+        res_str = f"{proc_width}x{proc_height}" if scale_input == 1.0 else f"{proc_width}x{proc_height} (original: {width}x{height})"
+        device_str = f"GPU: CUDA | Formato: {self.config.format.upper()}" if is_cuda_available() and self.config.device == "cuda" else f"CPU | Formato: {self.config.format.upper()}"
+
+        print("=" * 65)
+        print("🚀 INICIANDO ANÁLISIS DE FÚTBOL")
+        print(f"   Entorno:      {self.env.upper()} ({device_str})")
+        print(f"   Video:        {video_file.name}")
+        print(f"   Resolución:   {res_str}")
+        print(f"   Total Frames: {total_frames:,} @ {fps:.1f} fps")
+        print(f"   Modo:         {'HEADLESS (Extracción directa JSON/CSV)' if self.headless else 'VIDEO + OVERLAYS'}")
+        print("=" * 65, flush=True)
 
         writer: Optional[AsyncVideoWriter] = None
         if not self.headless and stream_cfg.get("use_async_writer", True):
@@ -241,7 +254,7 @@ class SoccerAnalyticsPipeline:
                     break
 
                 if scale_input < 1.0:
-                    frame_bgr = cv2.resize(frame_bgr, (proc_width, proc_height), interpolation=cv2.INTER_AREA)
+                    frame_bgr = cv2.resize(frame_bgr, (proc_width, proc_height), interpolation=cv2.INTER_LINEAR)
 
                 frame_count += 1
                 ts = frame_count / fps
@@ -481,18 +494,22 @@ class SoccerAnalyticsPipeline:
             db_out = str(Path(j_out).with_suffix(".sqlite"))
             self.exporter.export_sqlite(final_dataset, db_out)
 
-        # Resumen
-        logger.info("=" * 65)
-        logger.info("📊 RESUMEN FINAL DE EJECUCIÓN (analitica_futbol)")
-        logger.info(f"   Frames procesados: {frame_count} en {total_time:.2f}s ({fps_final:.2f} FPS)")
-        logger.info(f"   Posesión:          Equipo A: {possession_stats.get('team_0_pct', 0)}% | "
-                    f"Equipo B: {possession_stats.get('team_1_pct', 0)}%")
-        logger.info(f"   Eventos tácticos:  {len(all_events)} detectados")
-        logger.info(f"   Metadata JSON:     {m_out}")
-        logger.info(f"   Tracking JSON:     {j_out}")
+        # Resumen final limpio
+        print()
+        print("=" * 65)
+        print("✅ PROCESAMIENTO COMPLETADO")
+        print(f"   Tiempo total:    {total_time:.1f}s (~{int(total_time // 60)} min {int(total_time % 60)}s)")
+        print(f"   FPS promedio:    {fps_final:.1f} FPS")
+        print(f"   Posesión:        Equipo A: {possession_stats.get('team_0_pct', 0)}% | Equipo B: {possession_stats.get('team_1_pct', 0)}%")
+        print(f"   Eventos:         {len(all_events)} detectados")
+        print("   Archivos generados:")
+        print(f"     - Tracking JSON:  {j_out}")
+        print(f"     - Metadata JSON:  {m_out}")
+        if all_events:
+            print(f"     - Eventos CSV:    {c_out}")
         if not self.headless:
-            logger.info(f"   Video Output:      {v_out}")
-        logger.info("=" * 65)
+            print(f"     - Video Output:   {v_out}")
+        print("=" * 65, flush=True)
 
         return final_dataset
 
