@@ -1,0 +1,198 @@
+"""
+Módulo de Visión Artificial: Inferencia YOLO Unificada (PyTorch / OpenVINO)
+Ejecuta inferencia directa sin sockets HTTP ni capas cliente-servidor para:
+1. Keypoints del terreno de juego (YOLO Pose)
+2. Jugadores y árbitros (YOLO Detect + BoT-SORT)
+3. Balón de fútbol (YOLO Detect)
+"""
+
+import logging
+import time
+from pathlib import Path
+from typing import Tuple, Optional, Any, Union, List
+import numpy as np
+from ultralytics import YOLO
+
+from src.utils.config_loader import Config, load_config
+from src.utils.env import is_cuda_available
+
+logger = logging.getLogger("src.perception.detector")
+
+
+class YOLODetector:
+    """
+    Detector unificado multimodelo basado en Ultralytics YOLO.
+    Soporta inferencia tanto sobre modelos PyTorch (.pt en CUDA GPU) como
+    OpenVINO IR (.xml/.bin en Intel CPU).
+    """
+
+    def __init__(
+        self,
+        config: Optional[Config] = None,
+        device: Optional[str] = None,
+        model_format: Optional[str] = None,
+        player_model_path: Optional[Union[str, Path]] = None,
+        ball_model_path: Optional[Union[str, Path]] = None,
+        keypoint_model_path: Optional[Union[str, Path]] = None,
+        tracker_config_path: Optional[Union[str, Path]] = None,
+    ):
+        if config is None:
+            config = load_config()
+
+        self.config = config
+        self.device = device or getattr(config, "device", "cpu")
+        self.format = (model_format or getattr(config, "format", "openvino")).lower()
+
+        # Validación de CUDA
+        if self.device == "cuda" and not is_cuda_available():
+            logger.warning("[YOLODetector] ⚠️ CUDA no disponible en este entorno. Cambiando a CPU.")
+            self.device = "cpu"
+
+        # Resolver rutas de modelos
+        root = Path(getattr(config, "_project_root", Path(__file__).resolve().parent.parent.parent))
+
+        def _resolve_path(p: Optional[Union[str, Path]], default_rel: str) -> Path:
+            if p:
+                path_obj = Path(p)
+                return path_obj if path_obj.is_absolute() else root / path_obj
+            return root / default_rel
+
+        # Rutas por defecto según formato
+        if self.format == "pt":
+            def_player = "models/modelPlayer.pt"
+            def_ball = "models/modelBall.pt"
+            def_kp = "models/modelKeypoint.pt"
+        else:
+            def_player = "models/modelPlayer_openvino_model"
+            def_ball = "models/modelBall_openvino_model"
+            def_kp = "models/modelKeypoint_openvino_model"
+
+        cfg_models = getattr(config, "models", {})
+        self.player_model_path = _resolve_path(
+            player_model_path or cfg_models.get("player"), def_player
+        )
+        self.ball_model_path = _resolve_path(
+            ball_model_path or cfg_models.get("ball"), def_ball
+        )
+        self.keypoint_model_path = _resolve_path(
+            keypoint_model_path or cfg_models.get("keypoints"), def_kp
+        )
+
+        # Configuración de BoT-SORT
+        cfg_track = getattr(config, "tracking", {})
+        track_cfg_name = cfg_track.get("tracker_config", "configs/botsort_sports.yaml")
+        self.tracker_config_path = _resolve_path(tracker_config_path, track_cfg_name)
+
+        logger.info(
+            f"[YOLODetector] Inicializando motor — Formato: {self.format.upper()} | Dispositivo: {self.device.upper()}"
+        )
+        self._load_models()
+        logger.info("[YOLODetector] ✅ Los 3 modelos (Keypoints, Jugadores, Balón) cargados en memoria.")
+
+    def _load_models(self):
+        """Carga los tres modelos según el formato configurado."""
+        for name, path in [
+            ("Keypoints", self.keypoint_model_path),
+            ("Jugadores", self.player_model_path),
+            ("Balón", self.ball_model_path),
+        ]:
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"[YOLODetector] Modelo '{name}' no encontrado en: {path}. "
+                    f"Asegúrese de ubicar los pesos en la carpeta models/."
+                )
+
+        if self.format == "pt":
+            self.keypoint_model = YOLO(str(self.keypoint_model_path))
+            self.player_model = YOLO(str(self.player_model_path))
+            self.ball_model = YOLO(str(self.ball_model_path))
+        else:
+            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
+            self.player_model = YOLO(str(self.player_model_path), task="detect")
+            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
+
+    def infer_keypoints(self, frame_bgr: np.ndarray, conf: float = 0.35) -> Any:
+        """Inferencia de keypoints del campo con YOLO Pose."""
+        return self.keypoint_model.predict(
+            source=frame_bgr,
+            conf=conf,
+            device=self.device,
+            verbose=False,
+            save=False,
+        )[0]
+
+    def infer_players(
+        self,
+        frame_bgr: np.ndarray,
+        conf: float = 0.40,
+        is_video: bool = True,
+        persist: bool = True,
+        classes: Optional[List[int]] = None,
+    ) -> Any:
+        """Inferencia y seguimiento de jugadores con BoT-SORT restringido a clases válidas (1: goalkeeper, 2: player)."""
+        if classes is None:
+            cfg_det = getattr(self.config, "detection", {})
+            classes = cfg_det.get("player_filter_classes", [1, 2])
+
+        if is_video:
+            tracker_file = str(self.tracker_config_path) if self.tracker_config_path.exists() else "botsort.yaml"
+            try:
+                return self.player_model.track(
+                    source=frame_bgr,
+                    conf=conf,
+                    persist=persist,
+                    classes=classes,
+                    tracker=tracker_file,
+                    device=self.device,
+                    verbose=False,
+                )[0]
+            except Exception as e:
+                logger.warning(f"[YOLODetector] Error en tracker BoT-SORT: {e}. Usando predict clásico.")
+                return self.player_model.predict(
+                    source=frame_bgr,
+                    conf=conf,
+                    classes=classes,
+                    device=self.device,
+                    verbose=False,
+                )[0]
+        else:
+            return self.player_model.predict(
+                source=frame_bgr,
+                conf=conf,
+                classes=classes,
+                device=self.device,
+                verbose=False,
+            )[0]
+
+    def infer_ball(self, frame_bgr: np.ndarray, conf: float = 0.40) -> Any:
+        """Inferencia de balón de fútbol."""
+        return self.ball_model.predict(
+            source=frame_bgr,
+            conf=conf,
+            device=self.device,
+            verbose=False,
+            save=False,
+        )[0]
+
+    def infer(
+        self,
+        frame_bgr: np.ndarray,
+        conf_kp: float = 0.35,
+        conf_player: float = 0.40,
+        conf_ball: float = 0.40,
+        is_video: bool = True,
+        player_classes: Optional[List[int]] = None,
+    ) -> Tuple[Any, Any, Any]:
+        """
+        Ejecuta inferencia secuencial de los 3 modelos sobre el mismo frame.
+        Retorna:
+            (kp_result, player_result, ball_result)
+        """
+        kp_res = self.infer_keypoints(frame_bgr, conf=conf_kp)
+        pl_res = self.infer_players(frame_bgr, conf=conf_player, is_video=is_video, classes=player_classes)
+        ba_res = self.infer_ball(frame_bgr, conf=conf_ball)
+        return kp_res, pl_res, ba_res
+
+
+# Alias para compatibilidad con código existente
+DirectInferenceEngine = YOLODetector

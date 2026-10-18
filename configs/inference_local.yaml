@@ -1,0 +1,26 @@
+# configs/inference_local.yaml
+# Configuración optimizada para ejecución local en laptop / workstation (OpenVINO CPU)
+
+environment: "LOCAL"
+headless: false
+device: "cpu"
+format: "openvino"
+
+models:
+  player: "models/modelPlayer_openvino_model"
+  ball: "models/modelBall_openvino_model"
+  keypoints: "models/modelKeypoint_openvino_model"
+
+data:
+  input_video: "data/raw/input.mp4"
+  output_video: "data/processed/scouting_output.mp4"
+  output_json: "data/processed/tracking_output.json"
+  output_csv: "data/processed/events_output.csv"
+  rejections_csv: "data/processed/rejections_output.csv"
+  keypoints_audit_csv: "data/processed/keypoints_audit.csv"
+
+stream:
+  use_threaded_reader: true
+  reader_buffer_size: 64
+  use_async_writer: true
+  writer_buffer_size: 60

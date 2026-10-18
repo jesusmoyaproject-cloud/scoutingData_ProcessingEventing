@@ -1,0 +1,76 @@
+# configs/base.yaml
+# Parámetros constantes y reglas geométricas FIFA para ScoutingData
+
+pitch:
+  length: 105.0
+  width: 68.0
+  penalty_box_length: 16.5
+  penalty_box_width: 40.32
+  goal_box_length: 5.5
+  goal_box_width: 18.32
+  centre_circle_radius: 9.15
+  penalty_spot_distance: 11.0
+
+detection:
+  conf_keypoint: 0.35
+  conf_player: 0.40
+  conf_ball: 0.40
+  player_filter_classes: [1, 2]
+
+classes:
+  ball: 0
+  goalkeeper: 1
+  player: 2
+  referee: 3
+
+homography:
+  ransac_threshold: 1.5
+  method: "USAC_MAGSAC"
+  interval: 1
+  enable_corner_shift: true
+  enable_subpixel: true
+  subpixel_win_size: [5, 5]
+  max_subpixel_shift_px: 3.5
+  draw_outliers: false
+  min_dominant_points: 4
+
+tracking:
+  tracker_type: "botsort"
+  tracker_config: "configs/botsort_sports.yaml"
+  player_stride: 1
+  ball:
+    max_history: 10
+    max_missing_frames: 5
+    max_distance_jump: 180.0
+
+appearance:
+  min_samples_to_cluster: 30
+  history_window: 30
+  lock_threshold: 10
+  outlier_distance_lab: 40.0
+  min_cluster_separation: 20.0
+  luminance_weight: 0.30
+
+analytics:
+  possession_radius_m: 1.8
+  min_possession_frames: 3
+  max_control_relative_speed_mps: 6.0
+  enable_directional_cone: true
+  shot_goal_proximity_m: 25.0
+  pass_velocity_threshold_mps: 2.0
+
+visualization:
+  minimap_scale: 8.0
+  minimap_padding_m: 5.0
+  pitch_line_color: [0, 255, 255]
+  pitch_line_thickness: 2
+  show_frame_number: true
+  show_player_ids: true
+  show_minimap_ids: true
+
+data:
+  input_video: "data/raw/input.mp4"
+  output_video: "data/processed/scouting_output.mp4"
+  output_json: "data/processed/tracking_output.json"
+  output_csv: "data/processed/events_output.csv"
+  output_metadata: "data/processed/match_metadata.json"

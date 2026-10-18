@@ -1,0 +1,23 @@
+# BoTSORT configurado y optimizado para análisis de fútbol (ScoutingData)
+# Diseñado para alto rendimiento: sin ReID CNN pesada, con compensación de movimiento de cámara (GMC)
+
+tracker_type: botsort
+
+# Umbrales de detección y asociación
+track_high_thresh: 0.35    # Detecciones primarias de alta confianza
+track_low_thresh: 0.10     # Detecciones secundarias para recuperación tras oclusiones
+new_track_thresh: 0.40     # Umbral para inicializar una nueva trayectoria
+track_buffer: 45           # Buffer de 45 frames (1.5s a 30 FPS) para retener jugadores temporalmente ocultos
+match_thresh: 0.70         # Umbral de costo de asociación espacial (IoU)
+fuse_score: True           # Fusionar score de detección con movimiento
+
+# Global Motion Compensation (GMC) para cámaras deportivas en movimiento (paneo, tilt, zoom)
+gmc_method: sparseOptFlow  # Flujo óptico sparse Lucas-Kanade (óptimo en CPU y GPU)
+
+# Re-identificación (ReID)
+# Desactivado (False) para maximizar rendimiento tanto en CPU como en GPU.
+# La consistencia de equipo y posición de campo resuelven la asociación sin el costo de una CNN ReID.
+with_reid: False
+proximity_thresh: 0.5
+appearance_thresh: 0.8
+model: auto
