@@ -295,8 +295,9 @@ class SoccerAnalyticsPipeline:
                         frame_bgr, conf_kp=conf_kp, conf_player=conf_pl, conf_ball=conf_ba, is_video=True
                     )
                 else:
-                    kp_res = self.detector.infer_keypoints(frame_bgr, conf=conf_kp)
-                    ball_res = self.detector.infer_ball(frame_bgr, conf=conf_ba)
+                    kp_res, ball_res = self.detector.infer_keypoints_and_ball(
+                        frame_bgr, conf_kp=conf_kp, conf_ball=conf_ba
+                    )
                     player_res = None
                 total_inference_time += time.perf_counter() - t_inf0
 
