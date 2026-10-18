@@ -99,3 +99,114 @@ class JerseyColorExtractor:
         bgr_color = lab_to_bgr(lab_vector)
 
         return lab_vector, bgr_color
+
+
+class JerseyDescriptorExtractor:
+    """
+    Descriptor interno de apariencia del torso (solo para DIFERENCIAR grupos; no se exporta).
+
+    - ROI del torso superior reducido a un tamaño fijo y pequeño (barato).
+    - Césped descartado de forma ADAPTATIVA: el tono dominante del campo se estima por frame
+      (cada `grass_refresh_frames`) en lugar de usar un rango HSV fijo.
+    - Sin máscara de piel fija: el rango de piel (H 0-25) coincidía con camisetas rojas/naranjas
+      y las destruía.
+    - Histograma LAB cuantizado (L grueso para tolerar sombras; a/b más finos) normalizado y con
+      raíz cuadrada (distancia euclídea == distancia de Hellinger). Maneja camisetas a rayas
+      mejor que una mediana de color.
+    """
+
+    L_BINS = 4
+    A_BINS = 8
+    B_BINS = 8
+    DESC_DIM = L_BINS * A_BINS * B_BINS
+
+    def __init__(
+        self,
+        crop_size: Tuple[int, int] = (16, 24),
+        grass_refresh_frames: int = 30,
+        grass_hue_tolerance: int = 14,
+        grass_min_saturation: int = 35,
+        default_grass_hue: float = 60.0,
+    ):
+        self.crop_size = crop_size
+        self.grass_refresh_frames = grass_refresh_frames
+        self.grass_hue_tolerance = grass_hue_tolerance
+        self.grass_min_saturation = grass_min_saturation
+        self._grass_hue: Optional[float] = None
+        self._default_grass_hue = default_grass_hue
+        self._last_field_frame = -10 ** 9
+
+    @property
+    def grass_hue(self) -> float:
+        return self._grass_hue if self._grass_hue is not None else self._default_grass_hue
+
+    def update_field_model(self, frame_bgr: np.ndarray, frame_idx: int) -> None:
+        """Estima el tono dominante del césped (pico del histograma H en 25-95)."""
+        if self._grass_hue is not None and (frame_idx - self._last_field_frame) < self.grass_refresh_frames:
+            return
+        self._last_field_frame = frame_idx
+
+        h, w = frame_bgr.shape[:2]
+        small = cv2.resize(frame_bgr, (max(1, w // 8), max(1, h // 8)), interpolation=cv2.INTER_AREA)
+        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+        sel = (hsv[..., 1] >= 40) & (hsv[..., 2] >= 40)
+        n_sel = int(sel.sum())
+        if n_sel == 0:
+            return
+
+        hist = np.bincount(hsv[..., 0][sel].ravel(), minlength=180).astype(np.float32)
+        smooth = np.convolve(hist, np.ones(5, dtype=np.float32) / 5.0, mode="same")
+        lo, hi = 25, 95
+        peak = lo + int(np.argmax(smooth[lo:hi]))
+        share = float(hist[max(0, peak - 7):peak + 8].sum()) / float(n_sel)
+        if share < 0.15:
+            return
+
+        if self._grass_hue is None:
+            self._grass_hue = float(peak)
+        else:
+            self._grass_hue = 0.7 * self._grass_hue + 0.3 * float(peak)
+
+    def extract(self, frame_bgr: np.ndarray, bbox: List[float]) -> Optional[np.ndarray]:
+        """Retorna el descriptor (DESC_DIM,) float32 del torso, o None si el recorte es inválido."""
+        h_img, w_img = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox
+        bw = x2 - x1
+        bh = y2 - y1
+        if bw < 8 or bh < 16:
+            return None
+
+        ry1 = max(0, int(y1 + 0.15 * bh))
+        ry2 = min(h_img, int(y1 + 0.50 * bh))
+        rx1 = max(0, int(x1 + 0.15 * bw))
+        rx2 = min(w_img, int(x2 - 0.15 * bw))
+        if ry2 <= ry1 or rx2 <= rx1:
+            return None
+
+        crop = frame_bgr[ry1:ry2, rx1:rx2]
+        if crop.size == 0:
+            return None
+
+        small = cv2.resize(crop, self.crop_size, interpolation=cv2.INTER_AREA)
+        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+        lab = cv2.cvtColor(small, cv2.COLOR_BGR2LAB)
+
+        hue = hsv[..., 0].astype(np.int16)
+        grass = (np.abs(hue - self.grass_hue) <= self.grass_hue_tolerance) & (hsv[..., 1] >= self.grass_min_saturation)
+        valid = ~grass
+        if int(valid.sum()) < 0.2 * valid.size:
+            # Casi todo parece césped (p. ej. camiseta verde): usar todos los píxeles
+            valid = np.ones_like(valid)
+
+        px = lab[valid].astype(np.int32)
+        lb = (px[:, 0] * self.L_BINS) >> 8
+        ab = (px[:, 1] * self.A_BINS) >> 8
+        bb = (px[:, 2] * self.B_BINS) >> 8
+        idx = (lb * self.A_BINS + ab) * self.B_BINS + bb
+
+        hist = np.bincount(idx, minlength=self.DESC_DIM).astype(np.float32)
+        total = float(hist.sum())
+        if total <= 0:
+            return None
+        hist /= total
+        return np.sqrt(hist)

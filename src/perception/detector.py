@@ -147,6 +147,7 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
+            half=self.half,
             verbose=False,
             save=False,
         )[0]
@@ -174,6 +175,7 @@ class YOLODetector:
                     classes=classes,
                     tracker=tracker_file,
                     device=self.device,
+                    half=self.half,
                     verbose=False,
                 )[0]
             except Exception as e:
@@ -183,6 +185,7 @@ class YOLODetector:
                     conf=conf,
                     classes=classes,
                     device=self.device,
+                    half=self.half,
                     verbose=False,
                 )[0]
         else:
@@ -191,6 +194,7 @@ class YOLODetector:
                 conf=conf,
                 classes=classes,
                 device=self.device,
+                half=self.half,
                 verbose=False,
             )[0]
 
@@ -200,6 +204,7 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
+            half=self.half,
             verbose=False,
             save=False,
         )[0]
