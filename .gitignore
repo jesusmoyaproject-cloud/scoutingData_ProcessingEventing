@@ -1,7 +1,6 @@
 # Datos generados
 data/
 outputs/
-models/
 
 # Python
 __pycache__/
