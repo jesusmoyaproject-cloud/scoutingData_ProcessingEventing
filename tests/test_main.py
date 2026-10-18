@@ -214,8 +214,22 @@ class SoccerAnalyticsPipeline:
         total_frames = int(reader.get(cv2.CAP_PROP_FRAME_COUNT))
         effective_total = min(total_frames, effective_limit) if total_frames > 0 else effective_limit
 
+        # Escalar resolución si supera max_width para acelerar inferencia y reducir consumo de memoria/bus
+        max_w = stream_cfg.get("max_width", 1920)
+        scale_input = 1.0
+        proc_width = width
+        proc_height = height
+        if max_w and width > max_w:
+            scale_input = float(max_w) / float(width)
+            proc_width = int(round(width * scale_input))
+            proc_height = int(round(height * scale_input))
+            logger.info(
+                f"[Pipeline Test] ⚡ Re-escalado dinámico activo: {width}x{height} -> {proc_width}x{proc_height} "
+                f"(factor: {scale_input:.3f}, max_width: {max_w}px)"
+            )
+
         logger.info(
-            f"📹 Video: {video_file.name} | {width}x{height} @ {fps:.1f}fps | "
+            f"📹 Video: {video_file.name} | {proc_width}x{proc_height} (orig: {width}x{height}) @ {fps:.1f}fps | "
             f"Total: {total_frames} frames (Límite Test: {effective_total}) | "
             f"Modo: {'HEADLESS' if self.headless else 'VIDEO + OVERLAYS'}"
         )
@@ -224,8 +238,8 @@ class SoccerAnalyticsPipeline:
         if not self.headless and stream_cfg.get("use_async_writer", True):
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             minimap_aspect = (self.config.pitch.length + 10.0) / (self.config.pitch.width + 10.0)
-            combined_w = width + int(height * minimap_aspect)
-            writer = AsyncVideoWriter(v_out, fourcc, fps, (combined_w, height), buffer_size=stream_cfg.get("writer_buffer_size", 60))
+            combined_w = proc_width + int(proc_height * minimap_aspect)
+            writer = AsyncVideoWriter(v_out, fourcc, fps, (combined_w, proc_height), buffer_size=stream_cfg.get("writer_buffer_size", 60))
 
         frame_count = 0
         start_time = time.time()
@@ -252,6 +266,9 @@ class SoccerAnalyticsPipeline:
                     break
                 if frame_count >= effective_limit:
                     break
+
+                if scale_input < 1.0:
+                    frame_bgr = cv2.resize(frame_bgr, (proc_width, proc_height), interpolation=cv2.INTER_AREA)
 
                 frame_count += 1
                 ts = frame_count / fps
@@ -290,8 +307,8 @@ class SoccerAnalyticsPipeline:
                             kp_res,
                             conf_threshold=conf_kp,
                             ransac_threshold=self.config.homography.ransac_threshold,
-                            img_width=width,
-                            img_height=height,
+                            img_width=proc_width,
+                            img_height=proc_height,
                             frame_bgr=frame_bgr,
                             enable_subpixel=self.enable_subpixel,
                             subpixel_win_size=self.subpixel_win_size,
@@ -305,7 +322,7 @@ class SoccerAnalyticsPipeline:
                         H_cand = None
 
                     H_eff, mask_eff, _, _ = self.homography_tracker.update(
-                        H_cand, mask_cand, img_width=width, img_height=height, frame_id=frame_count, diagnostics=diag
+                        H_cand, mask_cand, img_width=proc_width, img_height=proc_height, frame_id=frame_count, diagnostics=diag
                     )
                     self._cached_H = H_eff
                     self._cached_mask = mask_eff
@@ -443,8 +460,10 @@ class SoccerAnalyticsPipeline:
                 "total_frames": frame_count,
                 "duration_seconds": round(frame_count / fps, 2),
                 "resolution": {
-                    "width": width,
-                    "height": height,
+                    "width": proc_width,
+                    "height": proc_height,
+                    "original_width": width,
+                    "original_height": height,
                 },
                 "pitch_dimensions_m": {
                     "length": float(self.config.pitch.length),
@@ -520,6 +539,7 @@ def main():
         default=MAX_TEST_FRAMES,
         help=f"Límite máximo de frames a procesar (por defecto {MAX_TEST_FRAMES}, restringido a máx {MAX_TEST_FRAMES})"
     )
+    parser.add_argument("--max-width", type=int, default=None, help="Ancho máximo de resolución para procesar (ej: 1920)")
     parser.add_argument("--headless", action="store_true", default=None, help="Forzar modo headless (sin MP4 ni overlays)")
     parser.add_argument("--export-sqlite", action="store_true", default=False, help="Exportar base de datos SQLite")
     args = parser.parse_args()
@@ -530,6 +550,13 @@ def main():
     config = load_config(args.config, project_root=ROOT_DIR)
     if args.headless:
         config.headless = True
+    if args.max_width is not None:
+        if not hasattr(config, "stream") or config.stream is None:
+            config.stream = {}
+        if isinstance(config.stream, dict):
+            config.stream["max_width"] = args.max_width
+        else:
+            setattr(config.stream, "max_width", args.max_width)
 
     pipeline = SoccerAnalyticsPipeline(config)
     pipeline.process_video(

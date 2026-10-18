@@ -83,8 +83,15 @@ class YOLODetector:
         track_cfg_name = cfg_track.get("tracker_config", "configs/botsort_sports.yaml")
         self.tracker_config_path = _resolve_path(tracker_config_path, track_cfg_name)
 
+        # Configuración de precisión FP16 (Half) para GPU CUDA
+        cfg_half = getattr(config, "half", None)
+        if cfg_half is not None:
+            self.half = bool(cfg_half) and ("cuda" in str(self.device).lower())
+        else:
+            self.half = (self.format == "pt" and "cuda" in str(self.device).lower())
+
         logger.info(
-            f"[YOLODetector] Inicializando motor — Formato: {self.format.upper()} | Dispositivo: {self.device.upper()}"
+            f"[YOLODetector] Inicializando motor — Formato: {self.format.upper()} | Dispositivo: {self.device.upper()} | FP16: {self.half}"
         )
         self._load_models()
         logger.info("[YOLODetector] ✅ Los 3 modelos (Keypoints, Jugadores, Balón) cargados en memoria.")
@@ -117,6 +124,7 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
+            half=self.half,
             verbose=False,
             save=False,
         )[0]
@@ -144,6 +152,7 @@ class YOLODetector:
                     classes=classes,
                     tracker=tracker_file,
                     device=self.device,
+                    half=self.half,
                     verbose=False,
                 )[0]
             except Exception as e:
@@ -153,6 +162,7 @@ class YOLODetector:
                     conf=conf,
                     classes=classes,
                     device=self.device,
+                    half=self.half,
                     verbose=False,
                 )[0]
         else:
@@ -161,6 +171,7 @@ class YOLODetector:
                 conf=conf,
                 classes=classes,
                 device=self.device,
+                half=self.half,
                 verbose=False,
             )[0]
 
@@ -170,6 +181,7 @@ class YOLODetector:
             source=frame_bgr,
             conf=conf,
             device=self.device,
+            half=self.half,
             verbose=False,
             save=False,
         )[0]

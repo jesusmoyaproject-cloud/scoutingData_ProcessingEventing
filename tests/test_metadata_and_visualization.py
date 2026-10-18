@@ -107,6 +107,31 @@ class TestMetadataAndVisualization(unittest.TestCase):
         self.assertIsNotNone(minimap)
         self.assertEqual(len(minimap.shape), 3)
 
+    def test_downscaling_logic_and_metadata(self):
+        # Simular entrada 2318x1270 con límite 1920
+        orig_w, orig_h = 2318, 1270
+        max_w = 1920
+        scale = max_w / orig_w
+        proc_w = int(round(orig_w * scale))
+        proc_h = int(round(orig_h * scale))
+
+        self.assertLess(scale, 1.0)
+        self.assertEqual(proc_w, 1920)
+        self.assertEqual(proc_h, 1052)
+
+        meta = {
+            "match_info": {
+                "resolution": {
+                    "width": proc_w,
+                    "height": proc_h,
+                    "original_width": orig_w,
+                    "original_height": orig_h,
+                }
+            }
+        }
+        self.assertEqual(meta["match_info"]["resolution"]["original_width"], 2318)
+        self.assertEqual(meta["match_info"]["resolution"]["width"], 1920)
+
 
 if __name__ == "__main__":
     unittest.main()

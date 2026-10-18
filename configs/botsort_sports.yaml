@@ -11,8 +11,8 @@ track_buffer: 45           # Buffer de 45 frames (1.5s a 30 FPS) para retener ju
 match_thresh: 0.70         # Umbral de costo de asociación espacial (IoU)
 fuse_score: True           # Fusionar score de detección con movimiento
 
-# Global Motion Compensation (GMC) para cámaras deportivas en movimiento (paneo, tilt, zoom)
-gmc_method: sparseOptFlow  # Flujo óptico sparse Lucas-Kanade (óptimo en CPU y GPU)
+# Global Motion Compensation (GMC): 'none' para máxima velocidad sin saturar CPU en videos de alta resolución
+gmc_method: none
 
 # Re-identificación (ReID)
 # Desactivado (False) para maximizar rendimiento tanto en CPU como en GPU.

@@ -26,7 +26,7 @@ classes:
 homography:
   ransac_threshold: 1.5
   method: "USAC_MAGSAC"
-  interval: 1
+  interval: 3
   enable_corner_shift: true
   enable_subpixel: true
   subpixel_win_size: [5, 5]
@@ -67,6 +67,9 @@ visualization:
   show_frame_number: true
   show_player_ids: true
   show_minimap_ids: true
+
+stream:
+  max_width: 1920
 
 data:
   input_video: "data/raw/input.mp4"

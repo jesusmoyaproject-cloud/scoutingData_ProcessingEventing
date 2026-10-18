@@ -1,10 +1,11 @@
 # configs/inference_cloud.yaml
 # Configuración optimizada para ejecución en nube (Colab / Kaggle T4 GPU / PyTorch CUDA)
 
-environment: "KAGGLE"
+environment: "COLAB"
 headless: true
 device: "cuda"
 format: "pt"
+half: true
 
 models:
   player: "models/modelPlayer.pt"
@@ -12,17 +13,22 @@ models:
   keypoints: "models/modelKeypoint.pt"
 
 data:
-  input_video: "/kaggle/input/soccer-match-video/input.mp4"
-  output_video: "/kaggle/working/outputs/scouting_output.mp4"
-  output_json: "/kaggle/working/outputs/tracking_output.json"
-  output_csv: "/kaggle/working/outputs/events_output.csv"
-  rejections_csv: "/kaggle/working/outputs/rejections_output.csv"
-  keypoints_audit_csv: "/kaggle/working/outputs/keypoints_audit.csv"
+  input_video: "/content/input.mp4"
+  output_video: "/content/outputs/scouting_output.mp4"
+  output_json: "/content/outputs/tracking_output.json"
+  output_csv: "/content/outputs/events_output.csv"
+  output_metadata: "/content/outputs/match_metadata.json"
+  rejections_csv: "/content/outputs/rejections_output.csv"
+  keypoints_audit_csv: "/content/outputs/keypoints_audit.csv"
+
+homography:
+  interval: 3
 
 tracking:
-  player_stride: 2
+  player_stride: 1
 
 stream:
+  max_width: 1920
   use_threaded_reader: true
   reader_buffer_size: 128
   use_async_writer: false
