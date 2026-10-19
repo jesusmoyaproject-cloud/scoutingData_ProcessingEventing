@@ -6,13 +6,13 @@ environment: "COLAB"
 headless: true
 compact_json: true
 device: "cuda"
-format: "pt" # Cambiar a "engine" una vez compilados los modelos en models/
+format: "engine" # Cambiar a "engine" una vez compilados los modelos en models/
 half: true
 
 models:
-  player: "models/modelPlayer.pt"       # o "models/modelPlayer.engine"
-  ball: "models/modelBall.pt"           # o "models/modelBall.engine"
-  keypoints: "models/modelKeypoint.pt"  # o "models/modelKeypoint.engine"
+  player: "models/modelPlayer.engine"       # o "models/modelPlayer.engine"
+  ball: "models/modelBall.engine"           # o "models/modelBall.engine"
+  keypoints: "models/modelKeypoint.engine"  # o "models/modelKeypoint.engine"
 
 data:
   input_video: "/content/input.mp4"

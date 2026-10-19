@@ -1,6 +1,7 @@
 # Datos generados
 data/
 outputs/
+tests/
 
 # Python
 __pycache__/
