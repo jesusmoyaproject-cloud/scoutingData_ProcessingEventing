@@ -22,7 +22,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.utils.config_loader import load_config, Config
 from src.utils.env import detect_environment, detect_headless_mode, is_cuda_available
-from src.utils.geometry import pixel_to_field
+from src.utils.geometry import pixel_to_field, get_pitch_template_specification
 from src.utils.video_stream import ThreadedVideoReader, AsyncVideoWriter
 from src.perception.detector import YOLODetector
 from src.perception.homography import (
@@ -311,10 +311,11 @@ class SoccerAnalyticsPipeline:
                     H_eff, mask_eff, _, _ = self.homography_tracker.update(
                         H_cand, mask_cand, img_width=proc_width, img_height=proc_height, frame_id=frame_count, diagnostics=diag
                     )
-                    self._cached_H = H_eff
-                    self._cached_mask = mask_eff
+                    if H_eff is not None:
+                        self._cached_H = H_eff
+                        self._cached_mask = mask_eff
 
-                H = self._cached_H
+                H = self._cached_H or self.homography_tracker.cached_H
                 total_homography_time += time.perf_counter() - t_hg0
 
                 # ── Proyección Balón a Campo ─────────────────────────────────
@@ -405,6 +406,10 @@ class SoccerAnalyticsPipeline:
                     "homography": {
                         "valid": bool(H is not None),
                         "matrix": [[round(float(val), 6) for val in row] for row in H] if H is not None else None,
+                        "inv_matrix": (
+                            [[round(float(val), 6) for val in row] for row in np.linalg.inv(H)]
+                            if H is not None else None
+                        ),
                     },
                     "homography_valid": bool(H is not None),
                 })
@@ -444,6 +449,17 @@ class SoccerAnalyticsPipeline:
         teams_meta = self.team_classifier.get_teams_metadata()
         possession_stats = self.possession_engine.get_possession_stats()
 
+        pitch_spec = get_pitch_template_specification(
+            length=float(self.config.pitch.length),
+            width=float(self.config.pitch.width),
+            penalty_box_length=float(getattr(self.config.pitch, "penalty_box_length", 16.5)),
+            penalty_box_width=float(getattr(self.config.pitch, "penalty_box_width", 40.32)),
+            goal_box_length=float(getattr(self.config.pitch, "goal_box_length", 5.5)),
+            goal_box_width=float(getattr(self.config.pitch, "goal_box_width", 18.32)),
+            centre_circle_radius=float(getattr(self.config.pitch, "centre_circle_radius", 9.15)),
+            penalty_spot_distance=float(getattr(self.config.pitch, "penalty_spot_distance", 11.0)),
+        )
+
         match_metadata = {
             "match_info": {
                 "video_name": video_file.name,
@@ -456,16 +472,15 @@ class SoccerAnalyticsPipeline:
                     "original_width": width,
                     "original_height": height,
                 },
-                "pitch_dimensions_m": {
-                    "length": float(self.config.pitch.length),
-                    "width": float(self.config.pitch.width),
-                },
+                "pitch_dimensions_m": pitch_spec["dimensions_m"],
             },
+            "pitch": pitch_spec,
             "teams": {
                 "team_a": teams_meta["team_a"],
                 "team_b": teams_meta["team_b"],
                 "referee": teams_meta["referee"],
             },
+
             "possession_stats": possession_stats,
             "inference": {
                 "device": self.config.device,

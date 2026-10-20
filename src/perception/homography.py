@@ -664,11 +664,10 @@ class TemporalHomographyTracker:
         if H_cand is None:
             self.reject_streak += 1
             reason = candidate_reject_reason or "NO_HOMOGRAPHY"
-            if self.reject_streak > self.max_reject_streak:
-                self.cached_H = None
-                self.cached_mask = None
-                return None, None, "RESET_DROP", {}
-            return self.cached_H, self.cached_mask, "REJECTED_HELD", {}
+            # Retener la última matriz válida en lugar de botarla a None y dejar coordenadas nulas
+            if self.cached_H is not None:
+                return self.cached_H, self.cached_mask, "HELD_FALLBACK", {}
+            return None, None, "NO_HOMOGRAPHY", {}
 
         H_cand_norm = normalize_homography(H_cand)
 

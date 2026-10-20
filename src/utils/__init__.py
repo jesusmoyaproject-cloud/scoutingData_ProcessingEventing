@@ -8,6 +8,7 @@ from src.utils.geometry import (
     bbox_to_center,
     bbox_to_center_bottom,
     compute_pitch_keypoint_coordinates,
+    get_pitch_template_specification,
 )
 from src.utils.video_stream import ThreadedVideoReader, ThreadedOpenCVReader, AsyncVideoWriter
 from src.utils.config_loader import load_config, Config
@@ -23,9 +24,11 @@ __all__ = [
     "bbox_to_center",
     "bbox_to_center_bottom",
     "compute_pitch_keypoint_coordinates",
+    "get_pitch_template_specification",
     "ThreadedVideoReader",
     "ThreadedOpenCVReader",
     "AsyncVideoWriter",
     "load_config",
     "Config",
 ]
+

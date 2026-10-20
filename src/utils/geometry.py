@@ -3,7 +3,7 @@ Módulo de Utilidades Geométricas y Transformaciones de Coordenadas
 Soporta conversiones entre espacio de imagen (píxeles) y coordenadas métricas de cancha (metros FIFA).
 """
 
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, Any
 import cv2
 import numpy as np
 
@@ -115,3 +115,62 @@ def compute_pitch_keypoint_coordinates(
         "14": (half_len - centre_circle_radius, half_wid),
         "19": (half_len + centre_circle_radius, half_wid),
     }
+
+
+def get_pitch_template_specification(
+    length: float = 105.0,
+    width: float = 68.0,
+    penalty_box_length: float = 16.5,
+    penalty_box_width: float = 40.32,
+    goal_box_length: float = 5.5,
+    goal_box_width: float = 18.32,
+    centre_circle_radius: float = 9.15,
+    penalty_spot_distance: float = 11.0,
+) -> Dict[str, Any]:
+    """
+    Retorna la especificación geométrica completa de la cancha y sus elementos vectoriales
+    en metros para consumo directo por frontends 2D (Canvas / SVG / WebGL).
+    """
+    half_len = round(length / 2.0, 2)
+    half_wid = round(width / 2.0, 2)
+    pb_y1 = round(half_wid - penalty_box_width / 2.0, 2)
+    pb_y2 = round(half_wid + penalty_box_width / 2.0, 2)
+    gb_y1 = round(half_wid - goal_box_width / 2.0, 2)
+    gb_y2 = round(half_wid + goal_box_width / 2.0, 2)
+
+    return {
+        "dimensions_m": {
+            "length": float(length),
+            "width": float(width),
+            "penalty_box_length": float(penalty_box_length),
+            "penalty_box_width": float(penalty_box_width),
+            "goal_box_length": float(goal_box_length),
+            "goal_box_width": float(goal_box_width),
+            "centre_circle_radius": float(centre_circle_radius),
+            "penalty_spot_distance": float(penalty_spot_distance),
+        },
+        "coordinate_system": {
+            "origin": "top_left",
+            "x_axis": "longitudinal_0_to_length",
+            "y_axis": "transversal_0_to_width",
+            "unit": "meters",
+        },
+        "vector_elements": {
+            "boundary": [[0.0, 0.0], [float(length), 0.0], [float(length), float(width)], [0.0, float(width)], [0.0, 0.0]],
+            "halfway_line": [[half_len, 0.0], [half_len, float(width)]],
+            "center_circle": {
+                "center": [half_len, half_wid],
+                "radius": float(centre_circle_radius),
+            },
+            "center_spot": [half_len, half_wid],
+            "penalty_box_left": [[0.0, pb_y1], [float(penalty_box_length), pb_y1], [float(penalty_box_length), pb_y2], [0.0, pb_y2]],
+            "penalty_box_right": [[float(length), pb_y1], [round(length - penalty_box_length, 2), pb_y1], [round(length - penalty_box_length, 2), pb_y2], [float(length), pb_y2]],
+            "goal_box_left": [[0.0, gb_y1], [float(goal_box_length), gb_y1], [float(goal_box_length), gb_y2], [0.0, gb_y2]],
+            "goal_box_right": [[float(length), gb_y1], [round(length - goal_box_length, 2), gb_y1], [round(length - goal_box_length, 2), gb_y2], [float(length), gb_y2]],
+            "penalty_spots": [
+                [float(penalty_spot_distance), half_wid],
+                [round(length - penalty_spot_distance, 2), half_wid],
+            ],
+        },
+    }
+
