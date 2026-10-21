@@ -372,10 +372,30 @@ class SoccerAnalyticsPipeline:
                 possession_info = self.possession_engine.update(ball_det, player_detections, timestamp_sec=ts)
                 self.event_detector.update(frame_count, ts, possession_info, ball_det)
 
+                # Keypoints detectados para calibración interactiva
+                frame_keypoints = []
+                if kp_res is not None and kp_res.keypoints is not None and len(kp_res.keypoints.data) > 0:
+                    from src.perception.homography import KP_MAP, FIELD_COORDS
+                    kps_arr = kp_res.keypoints.data[0].cpu().numpy()
+                    for idx_kp, pt_kp in enumerate(kps_arr):
+                        k_x, k_y, k_conf = pt_kp
+                        if k_conf >= conf_kp and idx_kp in KP_MAP:
+                            kp_id = KP_MAP[idx_kp]
+                            canon_coords = FIELD_COORDS.get(kp_id, (None, None))
+                            frame_keypoints.append({
+                                "id": kp_id,
+                                "pixel_x": round(float(k_x), 2),
+                                "pixel_y": round(float(k_y), 2),
+                                "pitch_x": round(float(canon_coords[0]), 2) if canon_coords[0] is not None else None,
+                                "pitch_y": round(float(canon_coords[1]), 2) if canon_coords[1] is not None else None,
+                                "conf": round(float(k_conf), 3),
+                            })
+
                 # ── JSON Frame Data ──────────────────────────────────────────
                 tracking_frames.append({
                     "frame": frame_count,
                     "timestamp": round(ts, 3),
+                    "keypoints": frame_keypoints,
                     "players": [
                         {
                             "track_id": p["player_id"],
