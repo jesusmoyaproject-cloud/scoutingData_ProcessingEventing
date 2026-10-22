@@ -108,13 +108,11 @@ class YOLODetector:
 
         # Configuración de concurrencia y CUDA Streams
         self.is_cuda = ("cuda" in str(self.device).lower()) and is_cuda_available()
-        self.stream_kp = torch.cuda.Stream() if self.is_cuda else None
-        self.stream_player = torch.cuda.Stream() if self.is_cuda else None
-        self.stream_ball = torch.cuda.Stream() if self.is_cuda else None
-        self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="YOLOInfer")
+        # Se omite ThreadPoolExecutor y CUDA Streams en GPU para evitar colisión con el profiler interno y CUDA Graphs de Ultralytics/TensorRT
+        self._executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="YOLOInfer") if not self.is_cuda else None
 
         logger.info(
-            f"[YOLODetector] Inicializando motor — Formato: {self.format.upper()} | Dispositivo: {self.device.upper()} | FP16: {self.half} | CUDA Streams: {self.is_cuda}"
+            f"[YOLODetector] Inicializando motor — Formato: {self.format.upper()} | Dispositivo: {self.device.upper()} | FP16: {self.half} | CUDA Nativo: {self.is_cuda}"
         )
         self._load_models()
         logger.info("[YOLODetector] ✅ Los 3 modelos (Keypoints, Jugadores, Balón) cargados en memoria.")
@@ -161,16 +159,6 @@ class YOLODetector:
 
     def infer_keypoints(self, frame_bgr: np.ndarray, conf: float = 0.35) -> Any:
         """Inferencia de keypoints del campo con YOLO Pose."""
-        if self.is_cuda and self.stream_kp is not None:
-            with torch.cuda.stream(self.stream_kp):
-                return self.keypoint_model.predict(
-                    source=frame_bgr,
-                    conf=conf,
-                    device=self.device,
-                    half=self.half,
-                    verbose=False,
-                    save=False,
-                )[0]
         return self.keypoint_model.predict(
             source=frame_bgr,
             conf=conf,
@@ -193,36 +181,21 @@ class YOLODetector:
             cfg_det = getattr(self.config, "detection", {})
             classes = cfg_det.get("player_filter_classes", [1, 2])
 
-        if self.is_cuda and self.stream_player is not None:
-            ctx = torch.cuda.stream(self.stream_player)
-        else:
-            ctx = torch.no_grad()
-
-        with ctx:
-            if is_video:
-                tracker_file = str(self.tracker_config_path) if self.tracker_config_path.exists() else "botsort.yaml"
-                try:
-                    return self.player_model.track(
-                        source=frame_bgr,
-                        conf=conf,
-                        persist=persist,
-                        classes=classes,
-                        tracker=tracker_file,
-                        device=self.device,
-                        half=self.half,
-                        verbose=False,
-                    )[0]
-                except Exception as e:
-                    logger.warning(f"[YOLODetector] Error en tracker BoT-SORT: {e}. Usando predict clásico.")
-                    return self.player_model.predict(
-                        source=frame_bgr,
-                        conf=conf,
-                        classes=classes,
-                        device=self.device,
-                        half=self.half,
-                        verbose=False,
-                    )[0]
-            else:
+        if is_video:
+            tracker_file = str(self.tracker_config_path) if self.tracker_config_path.exists() else "botsort.yaml"
+            try:
+                return self.player_model.track(
+                    source=frame_bgr,
+                    conf=conf,
+                    persist=persist,
+                    classes=classes,
+                    tracker=tracker_file,
+                    device=self.device,
+                    half=self.half,
+                    verbose=False,
+                )[0]
+            except Exception as e:
+                logger.warning(f"[YOLODetector] Error en tracker BoT-SORT: {e}. Usando predict clásico.")
                 return self.player_model.predict(
                     source=frame_bgr,
                     conf=conf,
@@ -231,19 +204,18 @@ class YOLODetector:
                     half=self.half,
                     verbose=False,
                 )[0]
+        else:
+            return self.player_model.predict(
+                source=frame_bgr,
+                conf=conf,
+                classes=classes,
+                device=self.device,
+                half=self.half,
+                verbose=False,
+            )[0]
 
     def infer_ball(self, frame_bgr: np.ndarray, conf: float = 0.40) -> Any:
         """Inferencia de balón de fútbol."""
-        if self.is_cuda and self.stream_ball is not None:
-            with torch.cuda.stream(self.stream_ball):
-                return self.ball_model.predict(
-                    source=frame_bgr,
-                    conf=conf,
-                    device=self.device,
-                    half=self.half,
-                    verbose=False,
-                    save=False,
-                )[0]
         return self.ball_model.predict(
             source=frame_bgr,
             conf=conf,
@@ -263,21 +235,20 @@ class YOLODetector:
         player_classes: Optional[List[int]] = None,
     ) -> Tuple[Any, Any, Any]:
         """
-        Ejecuta inferencia concurrente de los 3 modelos sobre el mismo frame
-        usando CUDA Streams dedicados y ThreadPoolExecutor.
+        Ejecuta inferencia de los 3 modelos sobre el frame.
+        En GPU (CUDA) se ejecuta secuencialmente para máxima estabilidad y compatibilidad con TensorRT y CUDA Graphs.
         """
+        if self.is_cuda or self._executor is None:
+            kp_res = self.infer_keypoints(frame_bgr, conf_kp)
+            pl_res = self.infer_players(frame_bgr, conf_player, is_video, True, player_classes)
+            ba_res = self.infer_ball(frame_bgr, conf_ball)
+            return kp_res, pl_res, ba_res
+
         fut_kp = self._executor.submit(self.infer_keypoints, frame_bgr, conf_kp)
         fut_pl = self._executor.submit(self.infer_players, frame_bgr, conf_player, is_video, True, player_classes)
         fut_ba = self._executor.submit(self.infer_ball, frame_bgr, conf_ball)
 
-        kp_res = fut_kp.result()
-        pl_res = fut_pl.result()
-        ba_res = fut_ba.result()
-
-        if self.is_cuda:
-            torch.cuda.synchronize()
-
-        return kp_res, pl_res, ba_res
+        return fut_kp.result(), fut_pl.result(), fut_ba.result()
 
     def infer_keypoints_and_ball(
         self,
@@ -285,21 +256,20 @@ class YOLODetector:
         conf_kp: float = 0.35,
         conf_ball: float = 0.40,
     ) -> Tuple[Any, Any]:
-        """Inferencia concurrente de keypoints y balón cuando se salta el stride de jugadores."""
+        """Inferencia de keypoints y balón cuando se salta el stride de jugadores."""
+        if self.is_cuda or self._executor is None:
+            kp_res = self.infer_keypoints(frame_bgr, conf_kp)
+            ba_res = self.infer_ball(frame_bgr, conf_ball)
+            return kp_res, ba_res
+
         fut_kp = self._executor.submit(self.infer_keypoints, frame_bgr, conf_kp)
         fut_ba = self._executor.submit(self.infer_ball, frame_bgr, conf_ball)
 
-        kp_res = fut_kp.result()
-        ba_res = fut_ba.result()
-
-        if self.is_cuda:
-            torch.cuda.synchronize()
-
-        return kp_res, ba_res
+        return fut_kp.result(), fut_ba.result()
 
     def close(self):
         """Libera el pool de hilos."""
-        if hasattr(self, "_executor"):
+        if hasattr(self, "_executor") and self._executor is not None:
             self._executor.shutdown(wait=False)
 
 
