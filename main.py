@@ -169,14 +169,31 @@ class SoccerAnalyticsPipeline:
         """Procesa un video completo ejecutando el pipeline de principio a fin."""
         cfg_data = getattr(self.config, "data", {})
         v_in = video_path or cfg_data.get("input_video", "data/raw/input.mp4")
-        v_out = output_video_path or cfg_data.get("output_video", "data/processed/scouting_output.mp4")
+        v_out = output_video_path if output_video_path is not None else cfg_data.get("output_video", None)
         j_out = output_json_path or cfg_data.get("output_json", "data/processed/tracking_output.json")
         c_out = output_csv_path or cfg_data.get("output_csv", "data/processed/events_output.csv")
         m_out = output_metadata_path or cfg_data.get("output_metadata", str(Path(j_out).parent / "match_metadata.json"))
 
+        # Determinar si se generará video: solo si no es headless y se proporcionó una ruta de salida de video
+        generate_video = (not self.headless) and (v_out is not None) and (str(v_out).strip() != "")
+
         video_file = Path(v_in)
         if not video_file.exists():
             raise FileNotFoundError(f"Video no encontrado: {video_file}")
+
+        # Inicializar renderer bajo demanda si se va a generar video
+        if generate_video and self.renderer is None:
+            vis_cfg = getattr(self.config, "visualization", {})
+            pitch_cfg = getattr(self.config, "pitch", {})
+            self.renderer = MatchRenderer(
+                pitch_length=pitch_cfg.get("length", 105.0),
+                pitch_width=pitch_cfg.get("width", 68.0),
+                minimap_scale=vis_cfg.get("minimap_scale", 8.0),
+                minimap_padding_m=vis_cfg.get("minimap_padding_m", 5.0),
+                show_frame_number=vis_cfg.get("show_frame_number", True),
+                show_player_ids=vis_cfg.get("show_player_ids", True),
+                show_minimap_ids=vis_cfg.get("show_minimap_ids", True),
+            )
 
         stream_cfg = getattr(self.config, "stream", {})
         use_reader = stream_cfg.get("use_threaded_reader", True)
@@ -215,11 +232,11 @@ class SoccerAnalyticsPipeline:
         print(f"   Video:        {video_file.name}")
         print(f"   Resolución:   {res_str}")
         print(f"   Total Frames: {total_frames:,} @ {fps:.1f} fps")
-        print(f"   Modo:         {'HEADLESS (Extracción directa JSON/CSV)' if self.headless else 'VIDEO + OVERLAYS'}")
+        print(f"   Modo:         {'VIDEO + OVERLAYS (Salida: ' + str(v_out) + ')' if generate_video else 'HEADLESS (Extracción directa JSON/CSV sin video)'}")
         print("=" * 65, flush=True)
 
         writer = None
-        if not self.headless:
+        if generate_video and v_out:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             # El frame combinado añade el minimapa a la derecha
             # Minimap width aprox = (105 + 10)*8 = 920px escalado a la altura de imagen

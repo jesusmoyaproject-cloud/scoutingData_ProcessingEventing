@@ -268,12 +268,9 @@ class AsyncVideoWriter:
         logger.info(f"[AsyncVideoWriter] Iniciado → {output_path} ({size[0]}x{size[1]} @ {fps:.1f}fps, buffer={buffer_size})")
 
     def write(self, frame: np.ndarray):
-        """Encola frame para escritura asíncrona. No bloquea el caller."""
-        try:
-            self._queue.put_nowait(frame)
-            self._frame_count += 1
-        except queue.Full:
-            logger.warning("[AsyncVideoWriter] ⚠️ Cola llena, frame descartado (escritura en disco lenta).")
+        """Encola frame para escritura asíncrona. Bloquea si la cola está llena para no perder cuadros."""
+        self._queue.put(frame, block=True)
+        self._frame_count += 1
 
     def _write_loop(self):
         while True:

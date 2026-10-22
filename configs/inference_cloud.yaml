@@ -16,7 +16,8 @@ models:
 
 data:
   input_video: "/content/input.mp4"
-  output_video: "/content/outputs/scouting_output.mp4"
+  # output_video: Generacion dinamica. Si se especifica en CLI (-o / --output), se renderiza el video con overlays y minimapa.
+  output_video: null
   output_json: "/content/outputs/tracking_output.json"
   output_csv: "/content/outputs/events_output.csv"
   output_metadata: "/content/outputs/match_metadata.json"
