@@ -218,14 +218,18 @@ class SoccerAnalyticsPipeline:
         print(f"   Modo:         {'HEADLESS (Extracción directa JSON/CSV)' if self.headless else 'VIDEO + OVERLAYS'}")
         print("=" * 65, flush=True)
 
-        writer: Optional[AsyncVideoWriter] = None
-        if not self.headless and stream_cfg.get("use_async_writer", True):
+        writer = None
+        if not self.headless:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             # El frame combinado añade el minimapa a la derecha
             # Minimap width aprox = (105 + 10)*8 = 920px escalado a la altura de imagen
             minimap_aspect = (self.config.pitch.length + 10.0) / (self.config.pitch.width + 10.0)
             combined_w = proc_width + int(proc_height * minimap_aspect)
-            writer = AsyncVideoWriter(v_out, fourcc, fps, (combined_w, proc_height), buffer_size=stream_cfg.get("writer_buffer_size", 60))
+            if stream_cfg.get("use_async_writer", True):
+                writer = AsyncVideoWriter(v_out, fourcc, fps, (combined_w, proc_height), buffer_size=stream_cfg.get("writer_buffer_size", 60))
+            else:
+                Path(v_out).parent.mkdir(parents=True, exist_ok=True)
+                writer = cv2.VideoWriter(v_out, fourcc, fps, (combined_w, proc_height))
 
         frame_count = 0
         start_time = time.time()

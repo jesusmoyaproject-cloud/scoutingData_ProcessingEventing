@@ -3,7 +3,7 @@
 # Soporta format: "engine" (TensorRT) o "pt" (PyTorch FP16)
 
 environment: "COLAB"
-headless: true
+headless: false
 compact_json: true
 device: "cuda"
 format: "engine" # Cambiar a "engine" una vez compilados los modelos en models/
@@ -33,4 +33,4 @@ stream:
   max_width: 1920
   use_threaded_reader: true
   reader_buffer_size: 128
-  use_async_writer: false
+  use_async_writer: true
