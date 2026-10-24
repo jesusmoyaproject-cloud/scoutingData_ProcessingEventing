@@ -30,8 +30,11 @@ from src.perception.homography import (
     TemporalHomographyTracker,
     KeypointAuditLogger,
     HomographyEstimateResult,
+    AuxFlowTracker,
 )
 from src.tracking.botsort import BallTracker, PlayerKinematicTracker
+from src.tracking.ukf_botsort import UKFBoTSORTTracker
+from src.analytics.offline_processor import OfflineTrajectoryProcessor
 from src.appearance.clustering import TeamClassifier
 from src.analytics.ball_possession import BallPossessionEngine
 from src.analytics.events import MatchEventDetector
@@ -55,7 +58,7 @@ try:
 except Exception:
     pass
 
-MAX_TEST_FRAMES = 3000
+MAX_TEST_FRAMES = 4000
 
 
 def extract_ball_detection(ball_result, conf_threshold: float = 0.40) -> Optional[Dict[str, Any]]:
@@ -98,13 +101,26 @@ class SoccerAnalyticsPipeline:
         self.homography_tracker = TemporalHomographyTracker(
             enable_corner_shift=homog_cfg.get("enable_corner_shift", True),
         )
+        self.auxflow_tracker = AuxFlowTracker(
+            fb_threshold_px=float(homog_cfg.get("auxflow_fb_threshold_px", 1.0))
+        )
         self.keypoint_audit_logger = KeypointAuditLogger()
         self._cached_H: Optional[np.ndarray] = None
         self._cached_mask: Optional[np.ndarray] = None
+        self.consecutive_no_kps_frames: int = 0
 
-        # 3. Tracking
+        # 3. Tracking (BoT-SORT Evolucionado: UKF + DIoU)
         track_cfg = getattr(config, "tracking", {})
         self.player_stride = max(1, track_cfg.get("player_stride", 1))
+        det_cfg = getattr(config, "detection", {})
+        conf_pl = float(det_cfg.get("conf_player", 0.50))
+        self.ukf_botsort = UKFBoTSORTTracker(
+            track_high_thresh=conf_pl,
+            track_low_thresh=0.20,
+            new_track_thresh=0.55,
+            track_buffer=45,
+            match_thresh=0.80,
+        )
         ball_cfg = track_cfg.get("ball", {})
         self.ball_tracker = BallTracker(
             max_history=ball_cfg.get("max_history", 10),
@@ -112,6 +128,11 @@ class SoccerAnalyticsPipeline:
             max_distance_jump=ball_cfg.get("max_distance_jump", 180.0),
         )
         self.player_kinematic = PlayerKinematicTracker()
+        self.offline_processor = OfflineTrajectoryProcessor(
+            sg_window_length=7,
+            sg_polyorder=2,
+            crossing_distance_thresh_m=1.5,
+        )
 
         # 4. Apariencia
         app_cfg = getattr(config, "appearance", {})
@@ -280,6 +301,7 @@ class SoccerAnalyticsPipeline:
         frame_count = 0
         start_time = time.time()
         tracking_frames: List[Dict[str, Any]] = []
+        raw_trajectories_map: Dict[int, List[Dict[str, Any]]] = {}
 
         total_read_decode_time = 0.0
         total_inference_time = 0.0
@@ -338,8 +360,64 @@ class SoccerAnalyticsPipeline:
                 diag = None
                 cand_residuals = None
 
-                if recalc_h:
+                # Extraer cajas de personas para descarte de keypoints y detector de plano cerrado
+                player_boxes = None
+                is_close_up = False
+                h_img_f, w_img_f = frame_bgr.shape[:2]
+
+                # Criterio 1: Tamaño relativo y cobertura de jugadores en la escena
+                if player_res is not None and player_res.boxes is not None and len(player_res.boxes) > 0:
+                    player_boxes = player_res.boxes.xyxy.cpu().numpy()
+                    box_heights = player_boxes[:, 3] - player_boxes[:, 1]
+                    box_widths = player_boxes[:, 2] - player_boxes[:, 0]
+                    max_box_h = float(np.max(box_heights)) if len(box_heights) > 0 else 0.0
+                    total_people_area = float(np.sum(box_heights * box_widths))
+                    people_area_ratio = total_people_area / float(h_img_f * w_img_f)
+
+                    # En tomas tácticas normales los jugadores miden ~5-12% de la altura y ocupan < 3% del área
+                    if max_box_h > (0.16 * h_img_f) or people_area_ratio > 0.07:
+                        is_close_up = True
+
+                # Criterio 2: Cobertura global de césped verde en el encuadre
+                # En un plano táctico de fútbol el césped ocupa > 55% de la toma. En planos medios o vallas ocupa mucho menos.
+                hsv_global = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+                green_mask_global = (
+                    (hsv_global[:, :, 0] >= 28)
+                    & (hsv_global[:, :, 0] <= 88)
+                    & (hsv_global[:, :, 1] >= 25)
+                    & (hsv_global[:, :, 2] >= 25)
+                )
+                field_green_ratio = float(np.mean(green_mask_global))
+                # Contar keypoints válidos en el frame actual
+                n_valid_kps = 0
+                if kp_res is not None and kp_res.keypoints is not None and len(kp_res.keypoints.data) > 0:
+                    kps_confs = kp_res.keypoints.conf[0].cpu().numpy()
+                    n_valid_kps = int(np.sum(kps_confs >= conf_kp))
+
+                if n_valid_kps == 0:
+                    self.consecutive_no_kps_frames += 1
+                else:
+                    self.consecutive_no_kps_frames = 0
+
+                # Si no hay keypoints por más de 3 frames (plano cerrado, corte, repetición) -> Forzar expiración de H
+                if self.consecutive_no_kps_frames > 3:
+                    is_close_up = True
+
+                if is_close_up:
+                    # En plano cerrado o toma sin keypoints de campo: invalidar H completamente
+                    H_cand = None
+                    self._cached_H = None
+                    self._cached_mask = None
+                    if hasattr(self.homography_tracker, "cached_H"):
+                        self.homography_tracker.cached_H = None
+                    if hasattr(self.auxflow_tracker, "prev_H"):
+                        self.auxflow_tracker.prev_H = None
+                elif recalc_h:
                     try:
+                        magsac_cfg_dict = getattr(self.config.homography, "magsac", None)
+                        if hasattr(magsac_cfg_dict, "__dict__"):
+                            magsac_cfg_dict = vars(magsac_cfg_dict)
+
                         res = compute_homography(
                             kp_res,
                             conf_threshold=conf_kp,
@@ -350,6 +428,10 @@ class SoccerAnalyticsPipeline:
                             enable_subpixel=self.enable_subpixel,
                             subpixel_win_size=self.subpixel_win_size,
                             max_subpixel_shift_px=self.max_subpixel_shift_px,
+                            exclude_boxes=player_boxes,
+                            method=getattr(self.config.homography, "method", "MAGSAC++"),
+                            magsac_cfg=magsac_cfg_dict,
+                            prev_H=self._cached_H,
                         )
                         H_cand = res.H
                         mask_cand = res.mask
@@ -361,10 +443,12 @@ class SoccerAnalyticsPipeline:
                     H_eff, mask_eff, _, _ = self.homography_tracker.update(
                         H_cand, mask_cand, img_width=proc_width, img_height=proc_height, frame_id=frame_count, diagnostics=diag
                     )
+                    # AuxFlow con Verificación Forward-Backward (<= 1px) para estabilización
+                    H_eff = self.auxflow_tracker.update(frame_bgr, current_H=H_eff, exclude_boxes=player_boxes)
                     self._cached_H = H_eff
                     self._cached_mask = mask_eff
 
-                H = self._cached_H
+                H = self._cached_H if not is_close_up else None
                 total_homography_time += time.perf_counter() - t_hg0
 
                 # ── Proyección Balón a Campo ─────────────────────────────────
@@ -376,55 +460,86 @@ class SoccerAnalyticsPipeline:
                     ball_det["pitch_x_m"] = None
                     ball_det["pitch_y_m"] = None
 
-                # ── Extracción y Tracking de Jugadores ───────────────────────
+                # ── Extracción y Tracking de Jugadores (BoT-SORT Evolucionado: UKF + DIoU) ──
                 player_detections: List[Dict[str, Any]] = []
                 if should_infer_players and player_res is not None and player_res.boxes is not None and len(player_res.boxes) > 0:
+                    raw_dets = []
                     boxes = player_res.boxes.xyxy.cpu().numpy()
                     confs = player_res.boxes.conf.cpu().numpy()
                     classes = player_res.boxes.cls.cpu().numpy()
-                    track_ids = player_res.boxes.id.cpu().numpy().astype(int) if player_res.boxes.id is not None else None
 
-                    for idx, (box, conf, cls_id) in enumerate(zip(boxes, confs, classes)):
-                        if conf < conf_pl:
-                            continue
+                    for box, conf, cls_id in zip(boxes, confs, classes):
                         cls_int = int(cls_id)
-                        # Filtrar estrictamente solo clases 1 (goalkeeper) y 2 (player) para evitar detecciones incorrectas
-                        if cls_int not in (1, 2):
-                            continue
+                        if cls_int in (1, 2) and conf >= 0.20:
+                            raw_dets.append({
+                                "bbox": [float(b) for b in box],
+                                "confidence": float(conf),
+                                "class_id": cls_int,
+                            })
 
-                        x1, y1, x2, y2 = box
-                        xc = float((x1 + x2) / 2.0)
-                        yb = float(y2)
-                        p_id = int(track_ids[idx]) if track_ids is not None else idx
+                    # Asociación en 2 etapas + predicción CTRV con UKF + costo DIoU
+                    tracked_players = self.ukf_botsort.update(raw_dets)
+
+                    for p in tracked_players:
+                        xc = p["pixel_x"]
+                        yb = p["pixel_y"]
                         fx, fy = pixel_to_field(xc, yb, H) if H is not None else (None, None)
-                        role = "goalkeeper" if cls_int == 1 else "player"
+                        if fx is not None and fy is not None:
+                            if not (-5.0 <= fx <= self.config.pitch.length + 5.0 and -5.0 <= fy <= self.config.pitch.width + 5.0):
+                                fx, fy = None, None
 
-                        player_detections.append({
-                            "player_id": p_id,
-                            "class_id": cls_int,
-                            "role": role,
-                            "confidence": float(conf),
-                            "bbox": [round(float(x1), 2), round(float(y1), 2), round(float(x2), 2), round(float(y2), 2)],
-                            "pixel_x": round(xc, 2),
-                            "pixel_y": round(yb, 2),
-                            "pitch_x_m": round(fx, 2) if fx is not None else None,
-                            "pitch_y_m": round(fy, 2) if fy is not None else None,
-                            "is_interpolated": False,
-                        })
+                        p["pitch_x_m"] = round(fx, 2) if fx is not None else None
+                        p["pitch_y_m"] = round(fy, 2) if fy is not None else None
+                        player_detections.append(p)
 
                     self.team_classifier.annotate_player_detections(frame_bgr, player_detections)
                     self.player_kinematic.update_from_detections(player_detections)
                 else:
                     player_detections = self.player_kinematic.extrapolate_next_frame(H=H)
 
+                # Acumular en trayectorias crudas para post-procesado batch
+                for p in player_detections:
+                    pid = p["player_id"]
+                    if pid not in raw_trajectories_map:
+                        raw_trajectories_map[pid] = []
+                    raw_trajectories_map[pid].append({
+                        "frame_idx": frame_count,
+                        "player_id": pid,
+                        "pitch_x_m": p.get("pitch_x_m"),
+                        "pitch_y_m": p.get("pitch_y_m"),
+                        "pixel_x": p.get("pixel_x"),
+                        "pixel_y": p.get("pixel_y"),
+                        "bbox": p.get("bbox"),
+                    })
+
                 # ── Analítica de Posesión y Eventos ──────────────────────────
                 possession_info = self.possession_engine.update(ball_det, player_detections, timestamp_sec=ts)
                 self.event_detector.update(frame_count, ts, possession_info, ball_det)
+
+                # Keypoints detectados para calibración interactiva y renderizado en front
+                frame_keypoints = []
+                if kp_res is not None and kp_res.keypoints is not None and len(kp_res.keypoints.data) > 0:
+                    from src.perception.homography import KP_MAP, FIELD_COORDS
+                    kps_arr = kp_res.keypoints.data[0].cpu().numpy()
+                    for idx_kp, pt_kp in enumerate(kps_arr):
+                        k_x, k_y, k_conf = pt_kp
+                        if k_conf >= conf_kp and idx_kp in KP_MAP:
+                            kp_id = KP_MAP[idx_kp]
+                            canon_coords = FIELD_COORDS.get(kp_id, (None, None))
+                            frame_keypoints.append({
+                                "id": kp_id,
+                                "pixel_x": round(float(k_x), 2),
+                                "pixel_y": round(float(k_y), 2),
+                                "pitch_x": round(float(canon_coords[0]), 2) if canon_coords[0] is not None else None,
+                                "pitch_y": round(float(canon_coords[1]), 2) if canon_coords[1] is not None else None,
+                                "conf": round(float(k_conf), 3),
+                            })
 
                 # ── JSON Frame Data ──────────────────────────────────────────
                 tracking_frames.append({
                     "frame": frame_count,
                     "timestamp": round(ts, 3),
+                    "keypoints": frame_keypoints,
                     "players": [
                         {
                             "track_id": p["player_id"],
@@ -455,6 +570,10 @@ class SoccerAnalyticsPipeline:
                     "homography": {
                         "valid": bool(H is not None),
                         "matrix": [[round(float(val), 6) for val in row] for row in H] if H is not None else None,
+                        "inv_matrix": (
+                            [[round(float(val), 6) for val in row] for row in np.linalg.inv(H)]
+                            if H is not None else None
+                        ),
                     },
                     "homography_valid": bool(H is not None),
                 })
@@ -463,12 +582,26 @@ class SoccerAnalyticsPipeline:
                 if not self.headless and self.renderer is not None and writer is not None:
                     t_rend0 = time.perf_counter()
                     annotated = frame_bgr.copy()
-                    if H is not None:
+                    if H is not None and not is_close_up:
                         self.renderer.draw_pitch_lines_on_frame(annotated, H)
+                        self.renderer.draw_keypoints_on_frame(annotated, frame_keypoints)
+
                     self.renderer.draw_players_on_frame(annotated, player_detections)
                     self.renderer.draw_ball_on_frame(annotated, ball_det, ball_history)
 
-                    minimap = self.renderer.render_minimap(player_detections, ball_det)
+                    # Superponer número de fotograma en la esquina superior izquierda (Zona izquierda superior)
+                    frame_text = f"FRAME: {frame_count:06d}"
+                    font_f = cv2.FONT_HERSHEY_SIMPLEX
+                    (tw_f, th_f), _ = cv2.getTextSize(frame_text, font_f, 0.65, 2)
+                    # Fondo semi-transparente oscuro
+                    cv2.rectangle(annotated, (20, 20), (35 + tw_f, 35 + th_f), (15, 23, 42), -1)
+                    cv2.rectangle(annotated, (20, 20), (35 + tw_f, 35 + th_f), (0, 215, 255), 1)
+                    cv2.putText(annotated, frame_text, (28, 26 + th_f), font_f, 0.65, (255, 255, 255), 2, lineType=cv2.LINE_AA)
+
+                    # Si es plano cerrado o H es None, renderizar el minimap vacío sin proyecciones fantasma
+                    valid_for_minimap = player_detections if (H is not None and not is_close_up) else []
+                    valid_ball_minimap = ball_det if (H is not None and not is_close_up) else None
+                    minimap = self.renderer.render_minimap(valid_for_minimap, valid_ball_minimap)
                     combined = self.renderer.compose_output_frame(annotated, minimap)
                     writer.write(combined)
                     total_render_time += time.perf_counter() - t_rend0
@@ -488,6 +621,34 @@ class SoccerAnalyticsPipeline:
 
         total_time = time.time() - start_time
         fps_final = frame_count / total_time if total_time > 0 else 0.0
+
+        # ── ETAPA 2: BATCH / OFFLINE (Savitzky-Golay + Corrección Geométrica de Cruces) ──
+        if raw_trajectories_map:
+            logger.info("🔧 [Etapa 2 Batch] Ejecutando filtro Savitzky-Golay (w=7, n=2) y resolución de cruces...")
+            refined_trajectories = self.offline_processor.process_all(raw_trajectories_map)
+
+            # Re-inyectar las coordenadas suavizadas y corregidas en tracking_frames
+            # Crear diccionario rápido (frame_idx, orig_pid) -> punto_refinado
+            refined_lookup = {}
+            for t_id, pts in refined_trajectories.items():
+                for p in pts:
+                    key = (p["frame_idx"], p.get("pixel_x"), p.get("pixel_y"))
+                    refined_lookup[key] = p
+
+            for frame_dict in tracking_frames:
+                f_idx = frame_dict["frame"]
+                for p in frame_dict["players"]:
+                    key = (f_idx, p.get("pixel_x"), p.get("pixel_y"))
+                    if key in refined_lookup:
+                        ref_pt = refined_lookup[key]
+                        p["pitch_x"] = ref_pt.get("pitch_x_m")
+                        p["pitch_y"] = ref_pt.get("pitch_y_m")
+                        if "player_id" in ref_pt:
+                            p["track_id"] = ref_pt["player_id"]
+                        if ref_pt.get("crossing_corrected"):
+                            p["crossing_corrected"] = True
+                        if ref_pt.get("is_smoothed_sg"):
+                            p["is_smoothed_sg"] = True
 
         # Construir Dataset Contract Oficial y Archivo de Metadatos Independiente
         all_events = self.event_detector.get_all_events()

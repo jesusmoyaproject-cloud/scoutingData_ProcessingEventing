@@ -13,7 +13,7 @@ pitch:
 
 detection:
   conf_keypoint: 0.35
-  conf_player: 0.40
+  conf_player: 0.50
   conf_ball: 0.40
   player_filter_classes: [1, 2]
 
@@ -25,7 +25,7 @@ classes:
 
 homography:
   ransac_threshold: 1.5
-  method: "USAC_MAGSAC"
+  method: "MAGSAC++"
   interval: 3
   enable_corner_shift: true
   enable_subpixel: true
@@ -33,9 +33,19 @@ homography:
   max_subpixel_shift_px: 3.5
   draw_outliers: false
   min_dominant_points: 4
+  enable_auxflow_fb: true
+  auxflow_fb_threshold_px: 1.0
+  magsac:
+    confidence: 0.995
+    max_iterations: 2500
+    lo_iterations: 10
+    lo_sample_size: 12
+    lo_method: "LOCAL_OPTIM_INNER_AND_ITER_LO"
+    final_polisher: "COV_POLISHER"
+    parallel: true
 
 tracking:
-  tracker_type: "botsort"
+  tracker_type: "ukf_botsort"
   tracker_config: "configs/botsort_sports.yaml"
   player_stride: 1
   ball:

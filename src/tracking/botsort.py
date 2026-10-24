@@ -102,13 +102,16 @@ class PlayerKinematicTracker:
     posiciones con base en la velocidad $(\Delta x, \Delta y)$ del track_id.
     """
 
-    def __init__(self):
+    def __init__(self, max_consecutive_extrapolations: int = 3):
+        self.max_consecutive_extrapolations = max_consecutive_extrapolations
+        self.consecutive_extrapolations = 0
         self.positions: Dict[int, Tuple[float, float]] = {}
         self.velocities: Dict[int, Tuple[float, float]] = {}
         self.last_detections: List[Dict[str, Any]] = []
 
     def update_from_detections(self, detections: List[Dict[str, Any]]):
         """Actualiza velocidades observadas a partir de una inferencia directa."""
+        self.consecutive_extrapolations = 0
         for p in detections:
             p_id = p["player_id"]
             xc = p["pixel_x"]
@@ -125,7 +128,15 @@ class PlayerKinematicTracker:
         self.last_detections = [dict(p) for p in detections]
 
     def extrapolate_next_frame(self, H: Optional[np.ndarray] = None) -> List[Dict[str, Any]]:
-        """Extrapola la posición de los jugadores en frames omitidos por stride."""
+        """Extrapola la posición de los jugadores solo en frames omitidos por stride corto (máx 3 frames)."""
+        self.consecutive_extrapolations += 1
+        if self.consecutive_extrapolations > self.max_consecutive_extrapolations:
+            # Corte de toma o ausencia de jugadores: expirar tracklets
+            self.last_detections = []
+            self.positions = {}
+            self.velocities = {}
+            return []
+
         extrapolated: List[Dict[str, Any]] = []
         for p_prev in self.last_detections:
             p = dict(p_prev)
@@ -148,6 +159,9 @@ class PlayerKinematicTracker:
                 fx, fy = pixel_to_field(p["pixel_x"], p["pixel_y"], H)
                 p["pitch_x_m"] = round(fx, 2)
                 p["pitch_y_m"] = round(fy, 2)
+            else:
+                p["pitch_x_m"] = None
+                p["pitch_y_m"] = None
 
             p["is_interpolated"] = True
             extrapolated.append(p)

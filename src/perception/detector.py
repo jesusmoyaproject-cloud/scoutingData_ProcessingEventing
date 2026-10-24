@@ -181,7 +181,9 @@ class YOLODetector:
             cfg_det = getattr(self.config, "detection", {})
             classes = cfg_det.get("player_filter_classes", [1, 2])
 
-        if is_video:
+        track_type = getattr(getattr(self.config, "tracking", {}), "tracker_type", "botsort")
+        # Si el tracking se delega a UKFBoTSORTTracker en el pipeline, usamos predict puro sin callbacks residuales
+        if is_video and track_type not in ("ukf_botsort",):
             tracker_file = str(self.tracker_config_path) if self.tracker_config_path.exists() else "botsort.yaml"
             try:
                 return self.player_model.track(
@@ -195,24 +197,26 @@ class YOLODetector:
                     verbose=False,
                 )[0]
             except Exception as e:
-                logger.warning(f"[YOLODetector] Error en tracker BoT-SORT: {e}. Usando predict clásico.")
-                return self.player_model.predict(
-                    source=frame_bgr,
-                    conf=conf,
-                    classes=classes,
-                    device=self.device,
-                    half=self.half,
-                    verbose=False,
-                )[0]
-        else:
-            return self.player_model.predict(
-                source=frame_bgr,
-                conf=conf,
-                classes=classes,
-                device=self.device,
-                half=self.half,
-                verbose=False,
-            )[0]
+                logger.debug(f"[YOLODetector] Track nativo Ultralytics omitido ({e}). Invocando predict directo.")
+
+        # Inferencia limpia (detección pura de bounding boxes para ser procesados por UKF + DIoU)
+        # Limpiamos callbacks de tracking si quedaron registrados en el predictor
+        if hasattr(self.player_model, "predictor") and self.player_model.predictor is not None:
+            callbacks = getattr(self.player_model.predictor, "callbacks", {})
+            if "on_predict_start" in callbacks:
+                callbacks["on_predict_start"] = [
+                    cb for cb in callbacks["on_predict_start"]
+                    if "on_predict_start" not in getattr(cb, "__name__", "") or "track" not in getattr(cb, "__module__", "")
+                ]
+
+        return self.player_model.predict(
+            source=frame_bgr,
+            conf=conf,
+            classes=classes,
+            device=self.device,
+            half=self.half,
+            verbose=False,
+        )[0]
 
     def infer_ball(self, frame_bgr: np.ndarray, conf: float = 0.40) -> Any:
         """Inferencia de balón de fútbol."""

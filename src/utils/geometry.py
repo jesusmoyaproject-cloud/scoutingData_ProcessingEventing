@@ -117,6 +117,42 @@ def compute_pitch_keypoint_coordinates(
     }
 
 
+PITCH_CENTER: Tuple[float, float] = (52.5, 34.0)
+
+KEYPOINT_METADATA: Dict[str, Dict[str, Any]] = {
+    "01": {"desc": "Banda Sup. Izq. (Corner)", "side": "left", "band": "top"},
+    "02": {"desc": "Área Grande Izq. - Línea Sup.", "side": "left", "band": "top"},
+    "03": {"desc": "Área Chica Izq. - Línea Sup.", "side": "left", "band": "top"},
+    "04": {"desc": "Área Chica Izq. - Línea Inf.", "side": "left", "band": "bottom"},
+    "05": {"desc": "Área Grande Izq. - Línea Inf.", "side": "left", "band": "bottom"},
+    "06": {"desc": "Banda Inf. Izq. (Corner)", "side": "left", "band": "bottom"},
+    "07": {"desc": "Área Chica Izq. - Vértice Sup.", "side": "left", "band": "top"},
+    "08": {"desc": "Área Chica Izq. - Vértice Inf.", "side": "left", "band": "bottom"},
+    "10": {"desc": "Área Grande Izq. - Vértice Sup.", "side": "left", "band": "top"},
+    "11": {"desc": "Medialuna Izq. - Arco Sup.", "side": "left", "band": "top"},
+    "12": {"desc": "Medialuna Izq. - Arco Inf.", "side": "left", "band": "bottom"},
+    "13": {"desc": "Área Grande Izq. - Vértice Inf.", "side": "left", "band": "bottom"},
+    "14": {"desc": "Círculo Central - Extremo Izq.", "side": "center", "band": "center"},
+    "15": {"desc": "Línea Central - Banda Sup.", "side": "center", "band": "top"},
+    "16": {"desc": "Círculo Central - Intersección Sup.", "side": "center", "band": "top"},
+    "17": {"desc": "Círculo Central - Intersección Inf.", "side": "center", "band": "bottom"},
+    "18": {"desc": "Línea Central - Banda Inf.", "side": "center", "band": "bottom"},
+    "19": {"desc": "Círculo Central - Extremo Der.", "side": "center", "band": "center"},
+    "20": {"desc": "Área Grande Der. - Vértice Sup.", "side": "right", "band": "top"},
+    "21": {"desc": "Medialuna Der. - Arco Sup.", "side": "right", "band": "top"},
+    "22": {"desc": "Medialuna Der. - Arco Inf.", "side": "right", "band": "bottom"},
+    "23": {"desc": "Área Grande Der. - Vértice Inf.", "side": "right", "band": "bottom"},
+    "25": {"desc": "Área Chica Der. - Vértice Sup.", "side": "right", "band": "top"},
+    "26": {"desc": "Área Chica Der. - Vértice Inf.", "side": "right", "band": "bottom"},
+    "27": {"desc": "Banda Sup. Der. (Corner)", "side": "right", "band": "top"},
+    "28": {"desc": "Área Grande Der. - Línea Sup.", "side": "right", "band": "top"},
+    "29": {"desc": "Área Chica Der. - Línea Sup.", "side": "right", "band": "top"},
+    "30": {"desc": "Área Chica Der. - Línea Inf.", "side": "right", "band": "bottom"},
+    "31": {"desc": "Área Grande Der. - Línea Inf.", "side": "right", "band": "bottom"},
+    "32": {"desc": "Banda Inf. Der. (Corner)", "side": "right", "band": "bottom"},
+}
+
+
 def get_pitch_template_specification(
     length: float = 105.0,
     width: float = 68.0,

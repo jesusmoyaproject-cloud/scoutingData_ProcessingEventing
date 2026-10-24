@@ -154,6 +154,19 @@ class MatchRenderer:
             if len(poly_pts) >= 2:
                 cv2.polylines(frame_bgr, [np.array(poly_pts, dtype=np.int32)], isClosed=False, color=color, thickness=thickness, lineType=cv2.LINE_AA)
 
+        # Proyectar el punto de saque central exacto (PITCH_CENTER = 52.5, 34.0) como cruz blanca destacada
+        try:
+            pt_center = np.array([[[self.pitch_length / 2.0, self.pitch_width / 2.0]]], dtype=np.float32)
+            cam_center = cv2.perspectiveTransform(pt_center, H_inv)[0, 0]
+            cx, cy = int(round(cam_center[0])), int(round(cam_center[1]))
+            if 0 <= cx < w_img and 0 <= cy < h_img:
+                arm = 6
+                cv2.line(frame_bgr, (cx - arm, cy), (cx + arm, cy), (255, 255, 255), 2, lineType=cv2.LINE_AA)
+                cv2.line(frame_bgr, (cx, cy - arm), (cx, cy + arm), (255, 255, 255), 2, lineType=cv2.LINE_AA)
+                cv2.circle(frame_bgr, (cx, cy), 3, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+        except Exception:
+            pass
+
     def draw_players_on_frame(
         self,
         frame_bgr: np.ndarray,
@@ -178,15 +191,18 @@ class MatchRenderer:
             if not self.show_player_ids:
                 continue
 
-            # Badge estilizado con ID y Rol
+            # Badge estilizado con ID, Rol y Nivel de Confianza (conf)
             p_id = p.get("player_id", "")
             role = p.get("role", "player")
+            conf_val = p.get("confidence")
+            conf_str = f" {int(round(conf_val * 100))}%" if conf_val is not None else ""
+
             if role == "goalkeeper":
-                label = f"ID: {p_id} (GK)"
+                label = f"ID: {p_id} (GK){conf_str}"
             elif role == "referee":
-                label = f"ID: {p_id} (REF)"
+                label = f"ID: {p_id} (REF){conf_str}"
             else:
-                label = f"ID: {p_id}"
+                label = f"ID: {p_id}{conf_str}"
 
             font = cv2.FONT_HERSHEY_SIMPLEX
             font_scale = 0.42
@@ -212,6 +228,66 @@ class MatchRenderer:
                 frame_bgr,
                 label,
                 (bx1 + pad_x, by2 - pad_y),
+                font,
+                font_scale,
+                (255, 255, 255),
+                thickness,
+                lineType=cv2.LINE_AA,
+            )
+
+    def draw_keypoints_on_frame(
+        self,
+        frame_bgr: np.ndarray,
+        keypoints: List[Dict[str, Any]],
+    ):
+        """
+        Dibuja los keypoints detectados de las líneas del campo con su ID y nivel de confianza (%).
+        """
+        if not keypoints:
+            return
+
+        h_img, w_img = frame_bgr.shape[:2]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.38
+        thickness = 1
+
+        for kp in keypoints:
+            px = kp.get("pixel_x")
+            py = kp.get("pixel_y")
+            kp_id = str(kp.get("id", ""))
+            conf_val = kp.get("conf")
+
+            if px is None or py is None:
+                continue
+
+            cx, cy = int(round(px)), int(round(py))
+            if cx < 0 or cx >= w_img or cy < 0 or cy >= h_img:
+                continue
+
+            # 1. Halo exterior y núcleo brillante
+            cv2.circle(frame_bgr, (cx, cy), 6, (0, 200, 255), 1, lineType=cv2.LINE_AA)
+            cv2.circle(frame_bgr, (cx, cy), 3, (0, 255, 255), -1, lineType=cv2.LINE_AA)
+
+            # 2. Badge con ID del Keypoint y nivel de confianza detectado
+            conf_text = f" {int(round(conf_val * 100))}%" if conf_val is not None else ""
+            label = f"{kp_id}{conf_text}"
+            (text_w, text_h), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+
+            box_x1 = cx - text_w // 2 - 3
+            box_y1 = cy - 10 - text_h
+            box_x2 = box_x1 + text_w + 6
+            box_y2 = cy - 6
+
+            if box_y1 < 0:
+                box_y1 = cy + 6
+                box_y2 = cy + 10 + text_h
+
+            cv2.rectangle(frame_bgr, (box_x1, box_y1), (box_x2, box_y2), (15, 23, 42), -1)
+            cv2.rectangle(frame_bgr, (box_x1, box_y1), (box_x2, box_y2), (0, 220, 255), 1)
+            cv2.putText(
+                frame_bgr,
+                label,
+                (box_x1 + 3, box_y2 - 2),
                 font,
                 font_scale,
                 (255, 255, 255),

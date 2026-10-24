@@ -309,8 +309,17 @@ class SoccerAnalyticsPipeline:
                 diag = None
                 cand_residuals = None
 
+                # Extraer cajas de jugadores/árbitros para descartar keypoints espurios sobre ellos
+                player_boxes = None
+                if player_res is not None and player_res.boxes is not None and len(player_res.boxes) > 0:
+                    player_boxes = player_res.boxes.xyxy.cpu().numpy()
+
                 if recalc_h:
                     try:
+                        magsac_cfg_dict = getattr(self.config.homography, "magsac", None)
+                        if hasattr(magsac_cfg_dict, "__dict__"):
+                            magsac_cfg_dict = vars(magsac_cfg_dict)
+
                         res = compute_homography(
                             kp_res,
                             conf_threshold=conf_kp,
@@ -321,6 +330,10 @@ class SoccerAnalyticsPipeline:
                             enable_subpixel=self.enable_subpixel,
                             subpixel_win_size=self.subpixel_win_size,
                             max_subpixel_shift_px=self.max_subpixel_shift_px,
+                            exclude_boxes=player_boxes,
+                            method=getattr(self.config.homography, "method", "MAGSAC++"),
+                            magsac_cfg=magsac_cfg_dict,
+                            prev_H=self._cached_H,
                         )
                         H_cand = res.H
                         mask_cand = res.mask
@@ -332,11 +345,10 @@ class SoccerAnalyticsPipeline:
                     H_eff, mask_eff, _, _ = self.homography_tracker.update(
                         H_cand, mask_cand, img_width=proc_width, img_height=proc_height, frame_id=frame_count, diagnostics=diag
                     )
-                    if H_eff is not None:
-                        self._cached_H = H_eff
-                        self._cached_mask = mask_eff
+                    self._cached_H = H_eff
+                    self._cached_mask = mask_eff
 
-                H = self._cached_H or self.homography_tracker.cached_H
+                H = self._cached_H
                 total_homography_time += time.perf_counter() - t_hg0
 
                 # ── Proyección Balón a Campo ─────────────────────────────────
@@ -369,6 +381,10 @@ class SoccerAnalyticsPipeline:
                         yb = float(y2)
                         p_id = int(track_ids[idx]) if track_ids is not None else idx
                         fx, fy = pixel_to_field(xc, yb, H) if H is not None else (None, None)
+                        # Validar límites lógicos del campo con margen de seguridad (-5m a L+5m / -5m a W+5m)
+                        if fx is not None and fy is not None:
+                            if not (-5.0 <= fx <= self.config.pitch.length + 5.0 and -5.0 <= fy <= self.config.pitch.width + 5.0):
+                                fx, fy = None, None
                         role = "goalkeeper" if cls_int == 1 else "player"
 
                         player_detections.append({
@@ -461,6 +477,7 @@ class SoccerAnalyticsPipeline:
                     annotated = frame_bgr.copy()
                     if H is not None:
                         self.renderer.draw_pitch_lines_on_frame(annotated, H)
+                    self.renderer.draw_keypoints_on_frame(annotated, frame_keypoints)
                     self.renderer.draw_players_on_frame(annotated, player_detections)
                     self.renderer.draw_ball_on_frame(annotated, ball_det, ball_history)
 
