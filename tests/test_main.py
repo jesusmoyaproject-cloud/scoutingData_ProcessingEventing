@@ -338,6 +338,11 @@ class SoccerAnalyticsPipeline:
                 diag = None
                 cand_residuals = None
 
+                # Extraer cajas de jugadores/árbitros para descartar keypoints espurios sobre ellos
+                player_boxes = None
+                if player_res is not None and player_res.boxes is not None and len(player_res.boxes) > 0:
+                    player_boxes = player_res.boxes.xyxy.cpu().numpy()
+
                 if recalc_h:
                     try:
                         res = compute_homography(
@@ -350,6 +355,7 @@ class SoccerAnalyticsPipeline:
                             enable_subpixel=self.enable_subpixel,
                             subpixel_win_size=self.subpixel_win_size,
                             max_subpixel_shift_px=self.max_subpixel_shift_px,
+                            exclude_boxes=player_boxes,
                         )
                         H_cand = res.H
                         mask_cand = res.mask
@@ -397,6 +403,10 @@ class SoccerAnalyticsPipeline:
                         yb = float(y2)
                         p_id = int(track_ids[idx]) if track_ids is not None else idx
                         fx, fy = pixel_to_field(xc, yb, H) if H is not None else (None, None)
+                        # Validar límites lógicos del campo con margen de seguridad (-5m a L+5m / -5m a W+5m)
+                        if fx is not None and fy is not None:
+                            if not (-5.0 <= fx <= self.config.pitch.length + 5.0 and -5.0 <= fy <= self.config.pitch.width + 5.0):
+                                fx, fy = None, None
                         role = "goalkeeper" if cls_int == 1 else "player"
 
                         player_detections.append({
@@ -421,10 +431,30 @@ class SoccerAnalyticsPipeline:
                 possession_info = self.possession_engine.update(ball_det, player_detections, timestamp_sec=ts)
                 self.event_detector.update(frame_count, ts, possession_info, ball_det)
 
+                # Keypoints detectados para calibración interactiva y renderizado en front
+                frame_keypoints = []
+                if kp_res is not None and kp_res.keypoints is not None and len(kp_res.keypoints.data) > 0:
+                    from src.perception.homography import KP_MAP, FIELD_COORDS
+                    kps_arr = kp_res.keypoints.data[0].cpu().numpy()
+                    for idx_kp, pt_kp in enumerate(kps_arr):
+                        k_x, k_y, k_conf = pt_kp
+                        if k_conf >= conf_kp and idx_kp in KP_MAP:
+                            kp_id = KP_MAP[idx_kp]
+                            canon_coords = FIELD_COORDS.get(kp_id, (None, None))
+                            frame_keypoints.append({
+                                "id": kp_id,
+                                "pixel_x": round(float(k_x), 2),
+                                "pixel_y": round(float(k_y), 2),
+                                "pitch_x": round(float(canon_coords[0]), 2) if canon_coords[0] is not None else None,
+                                "pitch_y": round(float(canon_coords[1]), 2) if canon_coords[1] is not None else None,
+                                "conf": round(float(k_conf), 3),
+                            })
+
                 # ── JSON Frame Data ──────────────────────────────────────────
                 tracking_frames.append({
                     "frame": frame_count,
                     "timestamp": round(ts, 3),
+                    "keypoints": frame_keypoints,
                     "players": [
                         {
                             "track_id": p["player_id"],
@@ -455,6 +485,10 @@ class SoccerAnalyticsPipeline:
                     "homography": {
                         "valid": bool(H is not None),
                         "matrix": [[round(float(val), 6) for val in row] for row in H] if H is not None else None,
+                        "inv_matrix": (
+                            [[round(float(val), 6) for val in row] for row in np.linalg.inv(H)]
+                            if H is not None else None
+                        ),
                     },
                     "homography_valid": bool(H is not None),
                 })
@@ -465,6 +499,7 @@ class SoccerAnalyticsPipeline:
                     annotated = frame_bgr.copy()
                     if H is not None:
                         self.renderer.draw_pitch_lines_on_frame(annotated, H)
+                    self.renderer.draw_keypoints_on_frame(annotated, frame_keypoints)
                     self.renderer.draw_players_on_frame(annotated, player_detections)
                     self.renderer.draw_ball_on_frame(annotated, ball_det, ball_history)
 

@@ -173,11 +173,11 @@ def validate_keypoint_geometry(
     img_width: int = 1920,
     img_height: int = 1080,
     min_points: int = 4,
-    min_hull_area_m2: float = 80.0,
-    min_image_coverage: float = 0.015,
-    min_collinearity_score: float = 0.08,
-    min_span_x_m: float = 6.0,
-    min_span_y_m: float = 5.0,
+    min_hull_area_m2: float = 150.0,
+    min_image_coverage: float = 0.04,
+    min_collinearity_score: float = 0.12,
+    min_span_x_m: float = 15.0,
+    min_span_y_m: float = 10.0,
 ) -> Tuple[bool, str, Dict[str, Any]]:
     n_pts = len(image_pts)
     if n_pts < min_points:
@@ -203,6 +203,9 @@ def validate_keypoint_geometry(
 
     if coverage_info["hull_area_field_m2"] < min_hull_area_m2:
         return False, f"Área de campo insuficiente ({coverage_info['hull_area_field_m2']:.1f}m² < {min_hull_area_m2}m²)", meta
+
+    if coverage_info.get("image_coverage_ratio", 0.0) < min_image_coverage:
+        return False, f"Cobertura en imagen insuficiente ({coverage_info.get('image_coverage_ratio', 0.0):.3f} < {min_image_coverage})", meta
 
     if fld_span_x < min_span_x_m or fld_span_y < min_span_y_m:
         return False, f"Dispersión 2D insuficiente (dx={fld_span_x:.1f}m, dy={fld_span_y:.1f}m)", meta
@@ -433,6 +436,7 @@ def compute_homography(
     enable_subpixel: bool = True,
     subpixel_win_size: Tuple[int, int] = (5, 5),
     max_subpixel_shift_px: float = 3.5,
+    exclude_boxes: Optional[np.ndarray] = None,
 ) -> HomographyEstimateResult:
     """Calcula la matriz H con USAC_MAGSAC, validación geométrica, refinamiento sub-píxel y telemetría."""
     if (
@@ -465,6 +469,21 @@ def compute_homography(
         valid_candidates = filter_border_keypoints(
             valid_candidates, img_width=img_width, img_height=img_height, border_margin_px=filter_border_margin_px
         )
+
+    # Filtrar keypoints espurios que caen dentro del cuerpo de jugadores o árbitros
+    if exclude_boxes is not None and len(exclude_boxes) > 0 and len(valid_candidates) > 0:
+        filtered_cands = []
+        for cand in valid_candidates:
+            kx, ky = cand[1]
+            in_person = False
+            for bx in exclude_boxes:
+                # bx = [x1, y1, x2, y2]
+                if bx[0] <= kx <= bx[2] and bx[1] <= ky <= bx[3]:
+                    in_person = True
+                    break
+            if not in_person:
+                filtered_cands.append(cand)
+        valid_candidates = filtered_cands
 
     image_pts_list = [xy for _, xy, _, _ in valid_candidates]
     field_pts_list = [FIELD_COORDS[lbl] for _, _, _, lbl in valid_candidates]
@@ -664,9 +683,15 @@ class TemporalHomographyTracker:
         if H_cand is None:
             self.reject_streak += 1
             reason = candidate_reject_reason or "NO_HOMOGRAPHY"
-            # Retener la última matriz válida en lugar de botarla a None y dejar coordenadas nulas
+            # Retener la última matriz solo temporalmente; si se prolonga la toma sin campo (plano cerrado/corte), expirar a None
             if self.cached_H is not None:
-                return self.cached_H, self.cached_mask, "HELD_FALLBACK", {}
+                if self.reject_streak <= self.max_reject_streak:
+                    return self.cached_H, self.cached_mask, "HELD_FALLBACK", {}
+                else:
+                    # Expirado: plano cerrado o corte de toma prolongado
+                    self.cached_H = None
+                    self.cached_mask = None
+                    return None, None, "EXPIRED_CLOSEUP", {}
             return None, None, "NO_HOMOGRAPHY", {}
 
         H_cand_norm = normalize_homography(H_cand)
