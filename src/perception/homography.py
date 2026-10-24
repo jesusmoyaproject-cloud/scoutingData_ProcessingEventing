@@ -416,8 +416,8 @@ def recover_guided_keypoints(
 
         dist = float(np.linalg.norm(xy - proj_px))
         if dist <= max_search_dist_px:
-            logger.info(
-                f"[GuidedRecovery] ✅ Keypoint marginal {label} (idx {idx}, conf={conf_val:.2f}) "
+            logger.debug(
+                f"[GuidedRecovery] Keypoint marginal {label} (idx {idx}, conf={conf_val:.2f}) "
                 f"rescatado con éxito (dist={dist:.1f}px de proyección previa)."
             )
             recovered.append((idx, xy, conf_val, label))
