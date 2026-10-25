@@ -24,9 +24,9 @@ analitica_futbol/
 │   ├── modelPlayer.pt                 # Detección de jugadores (PyTorch CUDA)
 │   ├── modelBall.pt                   # Detección de balón (PyTorch CUDA)
 │   ├── modelKeypoint.pt               # Detección de 30 keypoints (PyTorch CUDA)
-│   ├── modelPlayer_openvino_model/    # Modelo optimizado Intel OpenVINO IR
-│   ├── modelBall_openvino_model/      # Modelo optimizado Intel OpenVINO IR
-│   └── modelKeypoint_openvino_model/  # Modelo optimizado Intel OpenVINO IR
+│   ├── yolov11m-player_openvino_model/    # Modelo optimizado Intel OpenVINO IR (Jugadores)
+│   ├── yolov11m-ball_openvino_model/      # Modelo optimizado Intel OpenVINO IR (Balón)
+│   └── yolov11m-homography_openvino_model/# Modelo optimizado Intel OpenVINO IR (30 Keypoints)
 │
 ├── src/                               # Código fuente principal
 │   ├── perception/                    # Módulo 1: Visión Artificial

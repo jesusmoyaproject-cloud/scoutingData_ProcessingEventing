@@ -79,9 +79,9 @@ class YOLODetector:
             def_ball = "models/modelBall.pt"
             def_kp = "models/modelKeypoint.pt"
         else:
-            def_player = "models/modelPlayer_openvino_model"
-            def_ball = "models/modelBall_openvino_model"
-            def_kp = "models/modelKeypoint_openvino_model"
+            def_player = "models/yolov11m-player_openvino_model"
+            def_ball = "models/yolov11m-ball_openvino_model"
+            def_kp = "models/yolov11m-homography_openvino_model"
 
         cfg_models = getattr(config, "models", {})
         self.player_model_path = _resolve_path(

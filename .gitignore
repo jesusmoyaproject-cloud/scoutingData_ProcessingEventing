@@ -15,3 +15,10 @@ venv*
 *.mp4
 *.avi
 *.mo*
+
+# Modelos pesados (descargados/montados desde Google Drive o generados)
+models/*.pt
+models/*.engine
+models/*_openvino_model/
+models/*.bin
+models/*.xml

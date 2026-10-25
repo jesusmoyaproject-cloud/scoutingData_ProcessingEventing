@@ -7,9 +7,9 @@ device: "cpu"
 format: "openvino"
 
 models:
-  player: "models/modelPlayer_openvino_model"
-  ball: "models/modelBall_openvino_model"
-  keypoints: "models/modelKeypoint_openvino_model"
+  player: "models/yolov11m-player_openvino_model"
+  ball: "models/yolov11m-ball_openvino_model"
+  keypoints: "models/yolov11m-homography_openvino_model"
 
 data:
   input_video: "data/raw/input.mp4"

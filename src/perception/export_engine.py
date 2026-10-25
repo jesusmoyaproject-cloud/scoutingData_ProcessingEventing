@@ -12,6 +12,7 @@ import argparse
 import shutil
 import logging
 from pathlib import Path
+from typing import Optional
 
 # Asegurar importación de src
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -27,21 +28,25 @@ logger = logging.getLogger("export_engine")
 
 def export_model_to_engine(
     weights_path: Path,
+    output_dir: Optional[Path] = None,
     device: int = 0,
     half: bool = True,
-    imgsz: int = 640,
+    imgsz: int = 1280,
     batch: int = 1,
 ) -> Path:
     """
-    Exporta un modelo YOLO .pt a formato TensorRT .engine en FP16 y lo ubica en models/.
+    Exporta un modelo YOLO .pt a formato TensorRT .engine en FP16.
+    Si output_dir es especificado, se ubica allí; por defecto va a models/ o al directorio del peso.
     """
     weights_path = Path(weights_path).resolve()
     if not weights_path.exists():
         raise FileNotFoundError(f"Modelo .pt no encontrado: {weights_path}")
 
-    models_dir = weights_path.parent
+    target_dir = Path(output_dir).resolve() if output_dir else Path("models").resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     logger.info(f"🚀 Iniciando exportación TensorRT: {weights_path.name}")
-    logger.info(f"   Destino final: {models_dir}")
+    logger.info(f"   Destino final: {target_dir}")
     logger.info(f"   Precisión: {'FP16 (Half)' if half else 'FP32'}")
     logger.info(f"   Dispositivo: CUDA GPU {device}")
     logger.info(f"   Resolución base: {imgsz}x{imgsz}")
@@ -50,7 +55,6 @@ def export_model_to_engine(
     model = YOLO(str(weights_path))
 
     # Exportar a TensorRT
-    # Ultralytics compila el motor usando trtexec o tensorrt python API
     exported_file = model.export(
         format="engine",
         device=device,
@@ -61,12 +65,11 @@ def export_model_to_engine(
     )
 
     exported_path = Path(exported_file).resolve()
-    target_engine_path = models_dir / f"{weights_path.stem}.engine"
+    target_engine_path = target_dir / f"{weights_path.stem}.engine"
 
-    # Si Ultralytics lo generó en otra subcarpeta o con nombre distinto, reubicarlo en models/
     if exported_path != target_engine_path and exported_path.exists():
         shutil.move(str(exported_path), str(target_engine_path))
-        logger.info(f"📦 Motor reubicado en carpeta oficial: {target_engine_path}")
+        logger.info(f"📦 Motor reubicado en: {target_engine_path}")
     else:
         target_engine_path = exported_path
 
@@ -74,7 +77,7 @@ def export_model_to_engine(
     return target_engine_path
 
 
-def export_all_models(models_dir: Path, half: bool = True, device: int = 0):
+def export_all_models(models_dir: Path, half: bool = True, device: int = 0, imgsz: int = 1280):
     """Exporta los 3 modelos oficiales (Player, Ball, Keypoint) si están disponibles en models/."""
     targets = [
         ("Jugadores", models_dir / "modelPlayer.pt"),
@@ -84,8 +87,9 @@ def export_all_models(models_dir: Path, half: bool = True, device: int = 0):
 
     print("=" * 65)
     print("🔥 EXPORTADOR OFICIAL A TENSORRT (.engine) EN models/")
-    print(f"   Directorio: {models_dir}")
-    print(f"   Precisión:  {'FP16' if half else 'FP32'}")
+    print(f"   Directorio:  {models_dir}")
+    print(f"   Resolución:  {imgsz}x{imgsz}")
+    print(f"   Precisión:   {'FP16' if half else 'FP32'}")
     print("=" * 65)
 
     results = {}
@@ -93,7 +97,7 @@ def export_all_models(models_dir: Path, half: bool = True, device: int = 0):
         if path.exists():
             print(f"\n---> Compilando motor para {name} ({path.name})...")
             try:
-                engine_path = export_model_to_engine(path, device=device, half=half)
+                engine_path = export_model_to_engine(path, device=device, half=half, imgsz=imgsz)
                 results[name] = str(engine_path)
             except Exception as e:
                 logger.error(f"❌ Error al compilar {name}: {e}")
@@ -114,18 +118,28 @@ def main():
     parser.add_argument("--weights", "-w", type=str, default=None, help="Ruta a un archivo .pt específico (opcional)")
     parser.add_argument("--device", "-d", type=int, default=0, help="ID de la GPU CUDA (default: 0)")
     parser.add_argument("--half", action="store_true", default=True, help="Habilitar precisión FP16 (recomendado para L4/T4)")
+    parser.add_argument("--imgsz", type=int, default=1280, help="Resolución de inferencia (default: 1280)")
     parser.add_argument("--models-dir", type=str, default="models", help="Carpeta models/ (default: models)")
+    parser.add_argument("--output-dir", "-o", type=str, default=None, help="Carpeta de destino para los .engine (default: models/)")
     args = parser.parse_args()
 
     if not is_cuda_available():
         logger.error("❌ CUDA no está disponible en este entorno. TensorRT requiere una GPU NVIDIA con controladores CUDA.")
         sys.exit(1)
 
+    out_path = Path(args.output_dir).resolve() if args.output_dir else Path(args.models_dir).resolve()
     models_path = Path(args.models_dir).resolve()
+
     if args.weights:
-        export_model_to_engine(Path(args.weights), device=args.device, half=args.half)
+        export_model_to_engine(
+            Path(args.weights),
+            output_dir=out_path,
+            device=args.device,
+            half=args.half,
+            imgsz=args.imgsz,
+        )
     else:
-        export_all_models(models_path, half=args.half, device=args.device)
+        export_all_models(models_path, half=args.half, device=args.device, imgsz=args.imgsz)
 
 
 if __name__ == "__main__":
