@@ -1,19 +1,19 @@
-﻿# configs/inference_hybrid.yaml
+# configs/inference_hybrid.yaml
 # Configuracion hibrida optimizada para Google Colab:
-# - Jugadores y Balon en TensorRT (.engine) para maxima tasa de FPS
-# - Homografia / Keypoints en PyTorch (.pt) para evitar distorsiones numericas de TensorRT
+# - Jugadores y Balon en TensorRT (.engine) para maxima tasa de FPS en GPU CUDA
+# - Homografia / Keypoints en Intel OpenVINO IR para maxima estabilidad numerica
 
 environment: "COLAB"
 headless: false
 compact_json: true
 device: "cuda"
-format: "hybrid"    # Soporta combinacion heterogenea (.engine y .pt)
-half: true          # FP16 para los motores y para PyTorch en GPU
+format: "hybrid"    # Soporta combinacion heterogenea (.engine y openvino)
+half: true          # FP16 para los motores TensorRT en GPU
 
 models:
-  player: "models/modelPlayer.engine"       # TensorRT alta velocidad
-  ball: "models/modelBall.engine"           # TensorRT alta velocidad
-  keypoints: "models/modelKeypoint.pt"      # PyTorch .pt para fidelidad geometrica
+  player: "models/modelPlayer.engine"                      # TensorRT alta velocidad
+  ball: "models/modelBall.engine"                          # TensorRT alta velocidad
+  keypoints: "models/yolov11m-homography_openvino_model"   # OpenVINO IR para estabilidad geometrica
 
 data:
   input_video: "/content/input.mp4"
