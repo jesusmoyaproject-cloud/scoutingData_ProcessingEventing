@@ -117,8 +117,20 @@ class YOLODetector:
         self._load_models()
         logger.info("[YOLODetector] ✅ Los 3 modelos (Keypoints, Jugadores, Balón) cargados en memoria.")
 
+    def _load_single_model(self, path: Path, task: str) -> YOLO:
+        """Carga un modelo detectando su formato individual (.engine, .pt, openvino)."""
+        model = YOLO(str(path), task=task)
+        if path.suffix.lower() == ".pt" and self.half and "cuda" in str(self.device).lower():
+            try:
+                model.to(self.device)
+                if hasattr(model, "model") and model.model is not None:
+                    model.model.half()
+            except Exception as e:
+                logger.debug(f"[YOLODetector] Inicialización FP16 omitida para {path.name}: {e}")
+        return model
+
     def _load_models(self):
-        """Carga los tres modelos según el formato configurado."""
+        """Carga los tres modelos detectando de forma independiente el formato de cada uno."""
         for name, path in [
             ("Keypoints", self.keypoint_model_path),
             ("Jugadores", self.player_model_path),
@@ -127,35 +139,12 @@ class YOLODetector:
             if not path.exists():
                 raise FileNotFoundError(
                     f"[YOLODetector] Modelo '{name}' no encontrado en: {path}. "
-                    f"Asegúrese de ubicar los pesos en la carpeta models/."
+                    f"Asegúrese de ubicar los pesos en la carpeta models/ o especificar la ruta en el config."
                 )
 
-        if self.format == "engine":
-            # TensorRT Engine (.engine) nativo para GPU
-            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
-            self.player_model = YOLO(str(self.player_model_path), task="detect")
-            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
-        elif self.format == "pt":
-            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
-            self.player_model = YOLO(str(self.player_model_path), task="detect")
-            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
-            if self.half and "cuda" in str(self.device).lower():
-                try:
-                    self.keypoint_model.to(self.device)
-                    self.player_model.to(self.device)
-                    self.ball_model.to(self.device)
-                    if hasattr(self.keypoint_model, "model") and self.keypoint_model.model is not None:
-                        self.keypoint_model.model.half()
-                    if hasattr(self.player_model, "model") and self.player_model.model is not None:
-                        self.player_model.model.half()
-                    if hasattr(self.ball_model, "model") and self.ball_model.model is not None:
-                        self.ball_model.model.half()
-                except Exception as e:
-                    logger.debug(f"[YOLODetector] Inicialización FP16 omitida: {e}")
-        else:
-            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
-            self.player_model = YOLO(str(self.player_model_path), task="detect")
-            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
+        self.keypoint_model = self._load_single_model(self.keypoint_model_path, task="pose")
+        self.player_model = self._load_single_model(self.player_model_path, task="detect")
+        self.ball_model = self._load_single_model(self.ball_model_path, task="detect")
 
     def infer_keypoints(self, frame_bgr: np.ndarray, conf: float = 0.35) -> Any:
         """Inferencia de keypoints del campo con YOLO Pose."""

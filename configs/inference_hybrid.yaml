@@ -1,0 +1,37 @@
+﻿# configs/inference_hybrid.yaml
+# Configuracion hibrida optimizada para Google Colab:
+# - Jugadores y Balon en TensorRT (.engine) para maxima tasa de FPS
+# - Homografia / Keypoints en PyTorch (.pt) para evitar distorsiones numericas de TensorRT
+
+environment: "COLAB"
+headless: false
+compact_json: true
+device: "cuda"
+format: "hybrid"    # Soporta combinacion heterogenea (.engine y .pt)
+half: true          # FP16 para los motores y para PyTorch en GPU
+
+models:
+  player: "models/modelPlayer.engine"       # TensorRT alta velocidad
+  ball: "models/modelBall.engine"           # TensorRT alta velocidad
+  keypoints: "models/modelKeypoint.pt"      # PyTorch .pt para fidelidad geometrica
+
+data:
+  input_video: "/content/input.mp4"
+  output_video: null
+  output_json: "/content/outputs/tracking_output.json"
+  output_csv: "/content/outputs/events_output.csv"
+  output_metadata: "/content/outputs/match_metadata.json"
+  rejections_csv: "/content/outputs/rejections_output.csv"
+  keypoints_audit_csv: "/content/outputs/keypoints_audit.csv"
+
+homography:
+  interval: 6
+
+tracking:
+  player_stride: 2
+
+stream:
+  max_width: 1920
+  use_threaded_reader: true
+  reader_buffer_size: 128
+  use_async_writer: true
