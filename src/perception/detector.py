@@ -136,9 +136,9 @@ class YOLODetector:
             self.player_model = YOLO(str(self.player_model_path), task="detect")
             self.ball_model = YOLO(str(self.ball_model_path), task="detect")
         elif self.format == "pt":
-            self.keypoint_model = YOLO(str(self.keypoint_model_path))
-            self.player_model = YOLO(str(self.player_model_path))
-            self.ball_model = YOLO(str(self.ball_model_path))
+            self.keypoint_model = YOLO(str(self.keypoint_model_path), task="pose")
+            self.player_model = YOLO(str(self.player_model_path), task="detect")
+            self.ball_model = YOLO(str(self.ball_model_path), task="detect")
             if self.half and "cuda" in str(self.device).lower():
                 try:
                     self.keypoint_model.to(self.device)
